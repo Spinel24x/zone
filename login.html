@@ -1,28 +1,28 @@
 <!DOCTYPE html>
-<html lang="en">
+<html dir="ltr" lang="fa">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VLESS Manager - Login</title>
+    <title>ورود - پنل مدیریت VLESS</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="login-container">
         <div class="login-box">
-            <h1>🔐 VLESS Manager</h1>
-            <form method="POST" action="/login">
+            <h1>🔐 پنل مدیریت VLESS</h1>
+            {% if error %}
+            <div class="error-message">{{ error }}</div>
+            {% endif %}
+            <form method="POST">
                 <div class="form-group">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" name="username" required>
+                    <label>نام کاربری</label>
+                    <input type="text" name="username" required autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required>
+                    <label>رمز عبور</label>
+                    <input type="password" name="password" required>
                 </div>
-                {% if error %}
-                <div class="error-message">{{ error }}</div>
-                {% endif %}
-                <button type="submit" class="btn-login">Login</button>
+                <button type="submit" class="btn-login">ورود</button>
             </form>
         </div>
     </div>
