@@ -4,8 +4,7 @@
   },
   "inbounds": [
     {
-      "tag": "vless-ws-in",
-      "port": 8081,
+      "port": 8080,
       "listen": "127.0.0.1",
       "protocol": "vless",
       "settings": {
@@ -15,7 +14,7 @@
       "streamSettings": {
         "network": "ws",
         "wsSettings": {
-          "path": "/ws"
+          "path": "/vless-ws"
         }
       }
     }
@@ -24,6 +23,20 @@
     {
       "protocol": "freedom",
       "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
     }
-  ]
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "blocked"
+      }
+    ]
+  }
 }
