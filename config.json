@@ -1,6 +1,8 @@
 {
   "log": {
-    "loglevel": "warning"
+    "loglevel": "warning",
+    "access": "/dev/stdout",
+    "error": "/dev/stderr"
   },
   "inbounds": [
     {
@@ -14,7 +16,8 @@
       "streamSettings": {
         "network": "ws",
         "wsSettings": {
-          "path": "/vless-ws"
+          "path": "/vless-ws",
+          "acceptProxyProtocol": false
         }
       }
     }
@@ -35,6 +38,11 @@
       {
         "type": "field",
         "ip": ["geoip:private"],
+        "outboundTag": "blocked"
+      },
+      {
+        "type": "field",
+        "domain": ["geosite:category-ads"],
         "outboundTag": "blocked"
       }
     ]
