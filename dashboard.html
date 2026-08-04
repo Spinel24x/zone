@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZONE | Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <style>
-        {{ css | safe }}
-    </style>
+    <style>{{ css | safe }}</style>
 </head>
 <body>
     <canvas id="hexCanvas"></canvas>
@@ -58,11 +56,15 @@
                 <div class="card-body">
                     <div class="info-row">
                         <span class="info-label">UUID:</span>
-                        <code class="uuid-text">{{ client.id }}</code>
+                        <code class="uuid-text">{{ client.id[:16] }}...</code>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Path:</span>
                         <code>/ws</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Fingerprint:</span>
+                        <code>chrome</code>
                     </div>
                     {% if client.get('cleanip') %}
                     <div class="info-row">
@@ -72,10 +74,6 @@
                     {% endif %}
                     <div class="link-box" id="link-{{ client.id }}">Loading...</div>
                     <div class="qr-code" id="qr-{{ client.id }}"></div>
-                    <div class="sub-box" id="sub-{{ client.id }}" style="display:none;">
-                        <span class="info-label">Subscription:</span>
-                        <code id="sub-link-{{ client.id }}"></code>
-                    </div>
                 </div>
                 <div class="card-actions">
                     <button class="btn btn-sm" onclick="copyLink('{{ client.id }}')">📋 Copy</button>
@@ -154,7 +152,7 @@
             const el = document.getElementById('link-' + id);
             const text = el.textContent;
             if (!text || text === 'Loading...') {
-                showToast('❌ Link not loaded yet');
+                showToast('❌ Link not loaded');
                 return;
             }
             try {
@@ -172,12 +170,6 @@
         }
 
         async function getSub(id) {
-            const subBox = document.getElementById('sub-' + id);
-            const subLink = document.getElementById('sub-link-' + id);
-            if (subBox.style.display === 'none' || !subLink.textContent) {
-                subLink.textContent = `https://${DOMAIN}/sub/${id}`;
-                subBox.style.display = 'block';
-            }
             const url = `https://${DOMAIN}/sub/${id}`;
             try {
                 await navigator.clipboard.writeText(url);
