@@ -1,203 +1,235 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
-import subprocess, os, json, uuid, qrcode
-from io import BytesIO
-import base64
+from fastapi import FastAPI, Request, HTTPException, Depends, Form
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import secrets
+import subprocess
+import json
+import uuid
+import os
+import time
+import asyncio
+from datetime import datetime
+from typing import Optional
+import hashlib
 
-app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', str(uuid.uuid4()))
+app = FastAPI(title="Xray Tunnel Manager Pro", version="3.0.0")
 
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'login'
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-CONFIG_PATH = '/usr/local/etc/xray/config.json'
-ADMIN_USER = os.environ.get('ADMIN_USER', 'admin')
-ADMIN_PASS = os.environ.get('ADMIN_PASS', 'zone2024')
-DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'localhost')
+# Security
+security = HTTPBasic()
 
-# Load CSS
-CSS = ''
-try:
-    with open('/app/static/style.css', 'r', encoding='utf-8') as f:
-        CSS = f.read()
-except: pass
+# تنظیمات
+class Settings:
+    UUID = os.getenv("UUID", str(uuid.uuid4()))
+    CF_DOMAIN = os.getenv("CF_DOMAIN", "worker-name.workers.dev")
+    RW_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "app-name.railway.app")
+    WS_PATH = os.getenv("WS_PATH", "/ws")
+    XRAY_PORT = int(os.getenv("XRAY_PORT", 8080))
+    PANEL_PORT = int(os.getenv("PORT", 8000))
+    ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+    ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")
+    SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
+    
+settings = Settings()
 
-# Load JS
-ZONE_JS = ''
-try:
-    with open('/app/static/zone.js', 'r', encoding='utf-8') as f:
-        ZONE_JS = f.read()
-except: pass
+# سشن‌های ساده
+sessions = {}
 
-class User(UserMixin):
-    def __init__(self, id, username):
-        self.id = id
-        self.username = username
+# احراز هویت
+def verify_credentials(username: str, password: str):
+    return username == settings.ADMIN_USER and password == settings.ADMIN_PASS
 
-@login_manager.user_loader
-def load_user(user_id):
-    if user_id == '1': return User('1', ADMIN_USER)
-    return None
+def get_current_user(request: Request):
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in sessions:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return sessions[session_id]
 
-def load_config():
+# نصب و راه‌اندازی Xray
+def setup_xray():
     try:
-        with open(CONFIG_PATH, 'r') as f: return json.load(f)
-    except: return {
-        "log": {"loglevel": "warning"},
-        "inbounds": [{"tag":"vless-ws-in","port":8081,"listen":"127.0.0.1","protocol":"vless",
-        "settings":{"clients":[],"decryption":"none"},
-        "streamSettings":{"network":"ws","wsSettings":{"path":"/ws"}}}],
-        "outbounds": [{"protocol":"freedom","tag":"direct"}]
+        with open("config.json", "r") as f:
+            xray_config = json.load(f)
+        
+        xray_config["inbounds"][0]["settings"]["clients"][0]["id"] = settings.UUID
+        xray_config["inbounds"][0]["streamSettings"]["wsSettings"]["path"] = settings.WS_PATH
+        
+        os.makedirs("/etc/xray", exist_ok=True)
+        with open("/etc/xray/config.json", "w") as f:
+            json.dump(xray_config, f, indent=2)
+        
+        subprocess.Popen(["/usr/local/bin/xray", "run", "-config", "/etc/xray/config.json"])
+        print("✅ Xray started successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Xray setup failed: {e}")
+        return False
+
+@app.on_event("startup")
+async def startup():
+    setup_xray()
+
+@app.get("/")
+async def root(request: Request):
+    session_id = request.cookies.get("session_id")
+    if session_id in sessions:
+        return RedirectResponse(url="/dashboard")
+    return RedirectResponse(url="/login")
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    with open("login.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.post("/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    if verify_credentials(username, password):
+        session_id = secrets.token_urlsafe(32)
+        sessions[session_id] = {
+            "username": username,
+            "login_time": datetime.now().isoformat(),
+            "ip": "local"
+        }
+        
+        response = RedirectResponse(url="/dashboard", status_code=303)
+        response.set_cookie(
+            key="session_id",
+            value=session_id,
+            httponly=True,
+            max_age=86400,
+            samesite="lax"
+        )
+        return response
+    
+    return JSONResponse(
+        status_code=401,
+        content={"error": "نام کاربری یا رمز عبور اشتباه است"}
+    )
+
+@app.get("/logout")
+async def logout(request: Request):
+    session_id = request.cookies.get("session_id")
+    if session_id in sessions:
+        del sessions[session_id]
+    
+    response = RedirectResponse(url="/login")
+    response.delete_cookie("session_id")
+    return response
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    session_id = request.cookies.get("session_id")
+    if session_id not in sessions:
+        return RedirectResponse(url="/login")
+    
+    with open("dashboard.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/style.css")
+async def get_css():
+    with open("style.css", "r") as f:
+        return HTMLResponse(content=f.read(), media_type="text/css")
+
+@app.get("/zone.js")
+async def get_zone_js():
+    with open("zone.js", "r") as f:
+        return HTMLResponse(content=f.read(), media_type="application/javascript")
+
+@app.get("/api/status")
+async def api_status(request: Request):
+    session_id = request.cookies.get("session_id")
+    if session_id not in sessions:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    try:
+        xray_check = subprocess.run(
+            ["pgrep", "xray"],
+            capture_output=True,
+            text=True
+        )
+        xray_status = "running" if xray_check.returncode == 0 else "stopped"
+    except:
+        xray_status = "unknown"
+    
+    return {
+        "status": "active",
+        "uptime": "24/7",
+        "connections": 0,
+        "xray_status": xray_status,
+        "cf_domain": settings.CF_DOMAIN,
+        "rw_domain": settings.RW_DOMAIN,
+        "ws_path": settings.WS_PATH,
+        "uuid": settings.UUID[:8] + "...",
+        "timestamp": datetime.now().isoformat()
     }
 
-def save_config(cfg):
-    with open(CONFIG_PATH, 'w') as f: json.dump(cfg, f, indent=2)
-    restart_xray()
-
-def restart_xray():
-    subprocess.run(['pkill', '-x', 'xray'], capture_output=True)
-    subprocess.Popen(['/usr/local/xray/xray','run','-config',CONFIG_PATH],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-def mk_link(uid, email, cleanip=''):
-    name = email.split('@')[0] if '@' in email else email
-    host = cleanip.strip() if (cleanip and cleanip.strip()) else DOMAIN
-    return (f"vless://{uid}@{host}:443?"
-            f"encryption=none&security=tls&sni={DOMAIN}"
-            f"&alpn=h2,http/1.1&fp=chrome&type=ws"
-            f"&path=%2Fws&host={DOMAIN}#{name}-ZONE")
-
-def qr_b64(data):
-    qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    qr.add_data(data); qr.make(fit=True)
-    img = qr.make_image(fill_color="#00ff88", back_color="#0a0a0a")
-    buf = BytesIO(); img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode()
-
-# Routes
-@app.route('/login', methods=['GET','POST'])
-def login():
-    err = None
-    if request.method == 'POST':
-        if request.form.get('username')==ADMIN_USER and request.form.get('password')==ADMIN_PASS:
-            login_user(User('1', ADMIN_USER))
-            return redirect(url_for('dashboard'))
-        err = 'Invalid credentials'
-    return render_template('login.html', css=CSS, error=err)
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user(); return redirect(url_for('login'))
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    cfg = load_config()
-    clients = cfg['inbounds'][0]['settings']['clients']
-    for c in clients: c.setdefault('email','Unknown'); c.setdefault('cleanip',''); c.setdefault('enabled',True)
-    return render_template('dashboard.html', css=CSS, js=ZONE_JS,
-                           clients=clients,
-                           total_clients=len(clients),
-                           active_clients=sum(1 for c in clients if c.get('enabled',True)),
-                           domain=DOMAIN)
-
-@app.route('/')
-def index(): return redirect(url_for('dashboard'))
-
-@app.route('/api/clients')
-@login_required
-def api_clients():
-    cfg = load_config()
-    return jsonify([{
-        'id':c['id'], 'email':c.get('email',''), 'cleanip':c.get('cleanip',''),
-        'enabled':c.get('enabled',True), 'link':mk_link(c['id'],c.get('email',''),c.get('cleanip','')),
-        'qr':qr_b64(mk_link(c['id'],c.get('email',''),c.get('cleanip',''))),
-        'sub':f"https://{DOMAIN}/sub/{c['id']}"
-    } for c in cfg['inbounds'][0]['settings']['clients']])
-
-@app.route('/api/clients/add', methods=['POST'])
-@login_required
-def api_add():
-    data = request.json or {}
-    cfg = load_config(); clients = cfg['inbounds'][0]['settings']['clients']
-    if len(clients) >= 100: return jsonify({'error':'Max 100'}),400
+@app.get("/api/configs")
+async def api_configs(request: Request):
+    session_id = request.cookies.get("session_id")
+    if session_id not in sessions:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
-    bulk = data.get('bulk_emails','').strip()
-    if bulk:
-        emails = [e.strip() for e in bulk.split('\n') if e.strip()]
-        ips = [i.strip() for i in data.get('bulk_ips','').strip().split('\n') if i.strip()]
-        added = []
-        for idx,em in enumerate(emails):
-            if len(clients)>=100: break
-            cid = str(uuid.uuid4()); cip = ips[idx] if idx<len(ips) else ''
-            clients.append({'id':cid,'email':em,'level':0,'cleanip':cip,'enabled':True})
-            link = mk_link(cid,em,cip)
-            added.append({'id':cid,'email':em,'cleanip':cip,'link':link,'qr':qr_b64(link),'sub':f"https://{DOMAIN}/sub/{cid}"})
-        save_config(cfg)
-        return jsonify({'success':True,'clients':added})
+    vless_base = f"vless://{settings.UUID}@{settings.CF_DOMAIN}:443"
+    vless_params = f"?encryption=none&security=tls&sni={settings.CF_DOMAIN}&type=ws&host={settings.CF_DOMAIN}&path={settings.WS_PATH}&fp=random"
+    vless_full = vless_base + vless_params + "#Premium-Proxy"
     
-    cid = str(uuid.uuid4())
-    email = data.get('email','').strip() or f"user{uuid.uuid4().hex[:6]}@zone.local"
-    cleanip = data.get('cleanip','').strip()
-    clients.append({'id':cid,'email':email,'level':0,'cleanip':cleanip,'enabled':True})
-    save_config(cfg)
-    link = mk_link(cid,email,cleanip)
-    return jsonify({'success':True,'client':{'id':cid,'email':email,'cleanip':cleanip,'link':link,'qr':qr_b64(link),'sub':f"https://{DOMAIN}/sub/{cid}"}})
+    worker_env = f"""TARGET_WS_URL=wss://{settings.RW_DOMAIN}{settings.WS_PATH}
+UUID={settings.UUID}
+WS_PATH={settings.WS_PATH}
+CF_DOMAIN={settings.CF_DOMAIN}
+RW_DOMAIN={settings.RW_DOMAIN}
+ENABLE_AUTH=true
+AUTH_TOKEN={secrets.token_hex(16)}"""
+    
+    return {
+        "vless_config": vless_full,
+        "worker_env": worker_env,
+        "uuid": settings.UUID,
+        "details": {
+            "domain": settings.CF_DOMAIN,
+            "port": 443,
+            "network": "ws",
+            "path": settings.WS_PATH,
+            "security": "tls"
+        }
+    }
 
-@app.route('/api/clients/<cid>/delete', methods=['DELETE'])
-@login_required
-def api_del(cid):
-    cfg = load_config()
-    cfg['inbounds'][0]['settings']['clients'] = [c for c in cfg['inbounds'][0]['settings']['clients'] if c['id']!=cid]
-    save_config(cfg)
-    return jsonify({'success':True})
+@app.get("/api/update-config")
+async def update_config(
+    request: Request,
+    new_uuid: Optional[str] = None,
+    new_cf_domain: Optional[str] = None,
+    new_rw_domain: Optional[str] = None,
+    new_ws_path: Optional[str] = None
+):
+    session_id = request.cookies.get("session_id")
+    if session_id not in sessions:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    if new_uuid:
+        settings.UUID = new_uuid
+    if new_cf_domain:
+        settings.CF_DOMAIN = new_cf_domain
+    if new_rw_domain:
+        settings.RW_DOMAIN = new_rw_domain
+    if new_ws_path:
+        settings.WS_PATH = new_ws_path
+    
+    setup_xray()
+    
+    return {"success": True, "message": "تنظیمات بروزرسانی شد"}
 
-@app.route('/api/clients/<cid>/toggle', methods=['POST'])
-@login_required
-def api_toggle(cid):
-    cfg = load_config()
-    for c in cfg['inbounds'][0]['settings']['clients']:
-        if c['id']==cid: c['enabled'] = not c.get('enabled',True); break
-    save_config(cfg)
-    return jsonify({'success':True})
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-@app.route('/sub/<cid>')
-def sub(cid):
-    cfg = load_config()
-    for c in cfg['inbounds'][0]['settings']['clients']:
-        if c['id']==cid: return f"{mk_link(cid,c.get('email',''),c.get('cleanip',''))}\n",200,{'Content-Type':'text/plain'}
-    return "Not found",404
-
-@app.route('/api/status')
-@login_required
-def api_status():
-    r = subprocess.run(['pgrep','-x','xray'], capture_output=True)
-    cfg = load_config()
-    return jsonify({
-        'xray_running': r.returncode==0,
-        'total_clients': len(cfg['inbounds'][0]['settings']['clients']),
-        'active_clients': sum(1 for c in cfg['inbounds'][0]['settings']['clients'] if c.get('enabled',True))
-    })
-
-@app.route('/api/export/<cid>')
-@login_required
-def api_export(cid):
-    cfg = load_config()
-    for c in cfg['inbounds'][0]['settings']['clients']:
-        if c['id']==cid:
-            address = c.get('cleanip') or DOMAIN
-            return jsonify({
-                "dns":{"servers":["1.1.1.1","8.8.8.8"]},
-                "inbounds":[{"port":10808,"listen":"127.0.0.1","protocol":"socks"}],
-                "outbounds":[{
-                    "protocol":"vless",
-                    "settings":{"vnext":[{"address":address,"port":443,"users":[{"id":cid,"encryption":"none"}]}]},
-                    "streamSettings":{"network":"ws","security":"tls","wsSettings":{"path":"/ws","headers":{"Host":DOMAIN}},"tlsSettings":{"serverName":DOMAIN,"fingerprint":"chrome","alpn":["h2","http/1.1"]}}
-                }]
-            })
-    return jsonify({'error':'Not found'}),404
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT',5000)), debug=False)
+app.mount("/public", StaticFiles(directory="public"), name="public")
