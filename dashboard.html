@@ -5,48 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZONE | Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <style>{{ css | safe }}</style>
+    <style>
+        {{ css | safe }}
+    </style>
 </head>
 <body>
     <canvas id="hexCanvas"></canvas>
-    
+
     <div class="container">
+        <!-- HEADER -->
         <div class="header">
             <div class="header-left">
                 <h1>⚡ ZONE</h1>
-                <span class="status-badge">ONLINE</span>
+                <span class="status-badge" id="statusBadge">ONLINE</span>
             </div>
             <div class="header-right">
                 <div class="stats-mini">
                     <div class="stat-item">
-                        <span class="stat-label">Clients</span>
-                        <span class="stat-value" id="totalClients">0</span>
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value" id="totalClients">{{ total_clients }}</span>
                     </div>
                     <div class="stat-item">
                         <span class="stat-label">Active</span>
-                        <span class="stat-value" id="activeClients">0</span>
+                        <span class="stat-value" id="activeClients">{{ active_clients }}</span>
                     </div>
                 </div>
-                <a href="/logout" class="btn btn-danger">EXIT</a>
+                <a href="/logout" class="btn btn-danger btn-sm">EXIT</a>
             </div>
         </div>
-        
+
+        <!-- ADD SECTION -->
         <div class="add-section">
+            <div class="section-title">➕ Add Client</div>
             <div class="add-form">
-                <input type="text" id="emailInput" placeholder="Email or client name..." autocomplete="off">
-                <input type="text" id="cleanipInput" placeholder="Clean IP (1.2.3.4) or use default..." autocomplete="off">
-                <button class="btn btn-primary" onclick="addClient()">➕ ADD CLIENT</button>
+                <input type="text" id="emailInput" placeholder="Email (optional - auto-generated)" autocomplete="off">
+                <input type="text" id="cleanipInput" placeholder="Clean IP (optional)" autocomplete="off">
+                <button class="btn btn-primary" onclick="addClient()">ADD</button>
             </div>
+            <div class="section-title" style="margin-top:15px;">📦 Bulk Add</div>
             <div class="bulk-form">
-                <textarea id="bulkEmails" placeholder="Bulk add:&#10;user1@zone.local&#10;user2@zone.local&#10;user3@zone.local" rows="3"></textarea>
-                <textarea id="bulkCleanIPs" placeholder="Clean IPs per line:&#10;1.2.3.4&#10;5.6.7.8&#10;9.10.11.12" rows="3"></textarea>
-                <button class="btn btn-primary" onclick="bulkAddClients()">📦 BULK ADD</button>
+                <textarea id="bulkEmails" placeholder="user1@zone.local&#10;user2@zone.local&#10;user3@zone.local" rows="3"></textarea>
+                <textarea id="bulkIPs" placeholder="1.2.3.4&#10;5.6.7.8&#10;9.10.11.12" rows="3"></textarea>
+                <button class="btn btn-primary" onclick="bulkAdd()">BULK ADD</button>
             </div>
         </div>
-        
+
+        <!-- CLIENTS GRID -->
         <div class="clients-grid" id="clientsGrid">
             {% for client in clients %}
-            <div class="client-card" id="client-{{ client.id }}">
+            <div class="client-card" id="card-{{ client.id }}">
                 <div class="card-header">
                     <h3>👤 {{ client.get('email', 'Unknown') }}</h3>
                     <span class="status-dot {% if client.get('enabled', True) %}active{% else %}inactive{% endif %}"></span>
@@ -54,12 +61,18 @@
                 <div class="card-body">
                     <div class="info-row">
                         <span class="info-label">UUID:</span>
-                        <code>{{ client.id[:16] }}...</code>
+                        <code class="uuid-text">{{ client.id }}</code>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Clean IP:</span>
-                        <code class="cleanip-display">{{ client.get('cleanip', 'Default') }}</code>
+                        <span class="info-label">Path:</span>
+                        <code>/{{ client.id }}</code>
                     </div>
+                    {% if client.get('cleanip') %}
+                    <div class="info-row">
+                        <span class="info-label">Clean IP:</span>
+                        <code class="cleanip-display">{{ client.cleanip }}</code>
+                    </div>
+                    {% endif %}
                     <div class="link-box" id="link-{{ client.id }}">Loading...</div>
                     <div class="qr-code" id="qr-{{ client.id }}"></div>
                     <div class="sub-box" id="sub-{{ client.id }}" style="display:none;">
@@ -69,8 +82,8 @@
                 </div>
                 <div class="card-actions">
                     <button class="btn btn-sm" onclick="copyLink('{{ client.id }}')">📋 Copy</button>
-                    <button class="btn btn-sm btn-success" onclick="getSubscription('{{ client.id }}')">🔗 Sub</button>
-                    <button class="btn btn-sm btn-info" onclick="exportConfig('{{ client.id }}')">📥 JSON</button>
+                    <button class="btn btn-sm btn-success" onclick="getSub('{{ client.id }}')">🔗 Sub</button>
+                    <button class="btn btn-sm btn-info" onclick="exportJSON('{{ client.id }}')">📥 JSON</button>
                     <button class="btn btn-sm btn-warning" onclick="toggleClient('{{ client.id }}')">
                         {% if client.get('enabled', True) %}⏸️{% else %}▶️{% endif %}
                     </button>
@@ -79,10 +92,147 @@
             </div>
             {% endfor %}
         </div>
+
+        {% if not clients %}
+        <div class="empty-state">
+            <p>🚀 No clients yet. Add your first client above!</p>
+        </div>
+        {% endif %}
     </div>
-    
-    <div class="toast" id="toast">✅ Copied!</div>
-    
+
+    <div class="toast" id="toast">✅ Done!</div>
+
+    <script>
+        const DOMAIN = "{{ domain }}";
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.display = 'block';
+            setTimeout(() => { t.style.display = 'none'; }, 2500);
+        }
+
+        async function addClient() {
+            const email = document.getElementById('emailInput').value.trim();
+            const cleanip = document.getElementById('cleanipInput').value.trim();
+            const res = await fetch('/api/clients/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ email, cleanip })
+            });
+            const data = await res.json();
+            if (data.error) { showToast('❌ ' + data.error); return; }
+            showToast('✅ Client added!');
+            location.reload();
+        }
+
+        async function bulkAdd() {
+            const bulk_emails = document.getElementById('bulkEmails').value.trim();
+            const bulk_ips = document.getElementById('bulkIPs').value.trim();
+            if (!bulk_emails) { showToast('❌ Enter emails'); return; }
+            const res = await fetch('/api/clients/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ bulk_emails, bulk_ips })
+            });
+            const data = await res.json();
+            if (data.error) { showToast('❌ ' + data.error); return; }
+            showToast(`✅ ${data.clients.length} clients added!`);
+            location.reload();
+        }
+
+        async function deleteClient(id) {
+            if (!confirm('Delete this client?')) return;
+            await fetch(`/api/clients/${id}/delete`, { method: 'DELETE' });
+            showToast('🗑️ Deleted!');
+            location.reload();
+        }
+
+        async function toggleClient(id) {
+            await fetch(`/api/clients/${id}/toggle`, { method: 'POST' });
+            location.reload();
+        }
+
+        async function copyLink(id) {
+            const el = document.getElementById('link-' + id);
+            const text = el.textContent;
+            if (!text || text === 'Loading...') {
+                showToast('❌ Link not loaded yet');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('📋 Copied!');
+            } catch {
+                // Fallback
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('📋 Copied!');
+            }
+        }
+
+        async function getSub(id) {
+            const subBox = document.getElementById('sub-' + id);
+            const subLink = document.getElementById('sub-link-' + id);
+            if (subBox.style.display === 'none' || !subLink.textContent) {
+                const res = await fetch(`/sub/${id}`);
+                const text = await res.text();
+                subLink.textContent = `https://${DOMAIN}/sub/${id}`;
+                subBox.style.display = 'block';
+            }
+            const url = `https://${DOMAIN}/sub/${id}`;
+            try {
+                await navigator.clipboard.writeText(url);
+                showToast('🔗 Sub link copied!');
+            } catch {
+                showToast('🔗 ' + url);
+            }
+        }
+
+        async function exportJSON(id) {
+            const res = await fetch(`/api/export/${id}`);
+            const data = await res.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `zone-config-${id.slice(0,8)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('📥 Downloaded!');
+        }
+
+        // Load all links & QRs on page load
+        async function loadAllLinks() {
+            const res = await fetch('/api/clients');
+            const clients = await res.json();
+            clients.forEach(c => {
+                const linkEl = document.getElementById('link-' + c.id);
+                const qrEl = document.getElementById('qr-' + c.id);
+                if (linkEl) linkEl.textContent = c.link;
+                if (qrEl) qrEl.innerHTML = `<img src="data:image/png;base64,${c.qr}" style="max-width:180px;" alt="QR">`;
+            });
+        }
+
+        // Status check
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                document.getElementById('statusBadge').textContent = data.xray_running ? 'ONLINE' : 'OFFLINE';
+                document.getElementById('statusBadge').style.color = data.xray_running ? '#00ff88' : '#ff4444';
+                document.getElementById('totalClients').textContent = data.total_clients;
+                document.getElementById('activeClients').textContent = data.active_clients;
+            } catch(e) {}
+        }
+
+        loadAllLinks();
+        setInterval(checkStatus, 15000);
+    </script>
     <script>{{ js | safe }}</script>
 </body>
 </html>
