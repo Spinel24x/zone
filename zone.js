@@ -1,49 +1,48 @@
-// Zone Background Animation
+// Hexagon background animation
 const canvas = document.getElementById('hexCanvas');
-const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+if (canvas) {
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-let particles = [];
-const mouse = { x: -1000, y: -1000بسیار عالی! پروژه **Zone** با دیزاین حرفه‌ای. بذار همه فایل‌ها رو کامل بازنویسی کنم.
+    const hexSize = 40;
+    const hexWidth = hexSize * 2;
+    const hexHeight = Math.sqrt(3) * hexSize;
+    let offset = 0;
 
----
+    function drawHex(x, y, size) {
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const angle = (Math.PI / 3) * i - Math.PI / 6;
+            const hx = x + size * Math.cos(angle);
+            const hy = y + size * Math.sin(angle);
+            if (i === 0) ctx.moveTo(hx, hy);
+            else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(0, 255, 136, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
 
-## 1. Dockerfile (بدون تغییر - فقط اسم پوشه‌ها)
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        offset = (offset + 0.2) % (hexHeight * 2);
+        
+        for (let row = -1; row < canvas.height / hexHeight + 1; row++) {
+            for (let col = -1; col < canvas.width / hexWidth + 1; col++) {
+                const x = col * hexWidth * 0.75;
+                const y = row * hexHeight + (col % 2 === 0 ? 0 : hexHeight / 2) + offset;
+                drawHex(x, y, hexSize);
+            }
+        }
+        requestAnimationFrame(animate);
+    }
 
-```dockerfile
-FROM ubuntu:22.04
+    animate();
 
-RUN apt-get update && apt-get install -y \
-    curl \
-    unzip \
-    python3 \
-    python3-pip \
-    wget \
-    nginx \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /usr/local/xray && \
-    cd /tmp && \
-    wget https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
-    unzip Xray-linux-64.zip -d /usr/local/xray && \
-    chmod +x /usr/local/xray/xray && \
-    rm Xray-linux-64.zip && \
-    mkdir -p /usr/local/etc/xray
-
-COPY requirements.txt /tmp/
-RUN pip3 install -r /tmp/requirements.txt
-
-COPY nginx.conf /etc/nginx/sites-available/default
-COPY entrypoint.sh /entrypoint.sh
-COPY config.json /usr/local/etc/xray/config.json
-COPY app.py /app.py
-COPY login.html /login.html
-COPY dashboard.html /dashboard.html
-COPY style.css /style.css
-COPY zone.js /zone.js
-
-RUN chmod +x /entrypoint.sh
-
-EXPOSE 8080
-ENTRYPOINT ["/entrypoint.sh"]
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    });
+}
