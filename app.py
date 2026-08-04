@@ -1,6 +1,5 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from functools import wraps
 import subprocess
 import os
 import json
@@ -18,30 +17,30 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 # Load CSS
-with open('style.css', 'r', encoding='utf-8') as f:
-    CSS = f.read()
+CSS = ''
+for css_path in ['style.css', '/app/style.css']:
+    if os.path.exists(css_path):
+        with open(css_path, 'r', encoding='utf-8') as f:
+            CSS = f.read()
+        break
 
 # Load Zone JS
-with open('zone.js', 'r', encoding='utf-8') as f:
-    ZONE_JS = f.read()
+ZONE_JS = ''
+for js_path in ['zone.js', '/app/zone.js']:
+    if os.path.exists(js_path):
+        with open(js_path, 'r', encoding='utf-8') as f:
+            ZONE_JS = f.read()
+        break
 
 # Config path
 CONFIG_PATH = '/usr/local/etc/xray/config.json'
-USERS_FILE = '/data/users.json'
 
 # Default admin
 ADMIN_USERNAME = os.environ.get('ADMIN_USER', 'admin')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASS', 'zone2024')
 
-# Ensure data directory
-os.makedirs('/data', exist_ok=True)
-if not os.path.exists(USERS_FILE):
-    with open(USERS_FILE, 'w') as f:
-        json.dump([], f)
-
 # Domain
 DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'localhost')
-RAILWAY_PORT = os.environ.get('PORT', '8080')
 
 class User(UserMixin):
     def __init__(self, id, username):
@@ -79,17 +78,6 @@ def save_config(config):
 def restart_xray_service():
     subprocess.run(['pkill', '-x', 'xray'], capture_output=True)
     subprocess.Popen(['/usr/local/xray/xray', '-config', CONFIG_PATH])
-
-def load_users():
-    try:
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return []
-
-def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
 
 def generate_vless_link(client_id, email, cleanip=None):
     host = DOMAIN
