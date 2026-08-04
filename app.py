@@ -41,6 +41,10 @@ def index():
         return redirect('/dashboard')
     return redirect('/login')
 
+@app.route('/health')
+def health():
+    return 'OK', 200
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
@@ -64,6 +68,11 @@ def dashboard():
     config = load_config()
     clients = config['inbounds'][0]['settings']['clients']
     return render_template_string(DASHBOARD_HTML, clients=clients, css=CSS_STYLE)
+
+# WebSocket endpoint برای Xray
+@app.route('/ws')
+def websocket_proxy():
+    return 'WebSocket endpoint', 200
 
 @app.route('/api/clients')
 @login_required
@@ -152,7 +161,7 @@ def save_config(config):
 
 def restart_xray():
     os.system('pkill xray')
-    subprocess.Popen(['/usr/local/bin/xray', '-config', XRAY_CONFIG_PATH])
+    subprocess.Popen(['/usr/local/xray/xray', '-config', XRAY_CONFIG_PATH])
 
 def generate_vless_link(uuid, email):
     return f"vless://{uuid}@{WORKER_DOMAIN}:443?path=%2Fws&security=tls&encryption=none&host={WORKER_DOMAIN}&type=ws&sni={WORKER_DOMAIN}#{email}"
@@ -167,4 +176,5 @@ def generate_qr_base64(data):
     return base64.b64encode(buffered.getvalue()).decode()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, debug=False)
