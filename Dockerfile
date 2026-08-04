@@ -1,34 +1,29 @@
-FROM ubuntu:22.04
+FROM teddysun/xray:latest
 
-WORKDIR /app
-
+# Install Python and nginx for management panel
 RUN apt-get update && apt-get install -y \
-    curl unzip python3 python3-pip wget nginx \
+    python3 \
+    python3-pip \
+    nginx \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /usr/local/xray && \
-    cd /tmp && \
-    wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
-    unzip -q Xray-linux-64.zip -d /usr/local/xray && \
-    chmod +x /usr/local/xray/xray && \
-    rm Xray-linux-64.zip && \
-    mkdir -p /usr/local/etc/xray
-
-RUN mkdir -p /app/templates /app/static
-
-COPY requirements.txt /tmp/
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
-
-COPY nginx.conf /etc/nginx/sites-available/default
-COPY entrypoint.sh /entrypoint.sh
-COPY config.json /usr/local/etc/xray/config.json
+# Copy configuration files
+COPY config.json /etc/xray/config.json
+COPY nginx.conf /etc/nginx/nginx.conf
 COPY app.py /app/app.py
-COPY login.html /app/templates/login.html
-COPY dashboard.html /app/templates/dashboard.html
-COPY style.css /app/static/style.css
-COPY zone.js /app/static/zone.js
+COPY dashboard.html /app/dashboard.html
+COPY login.html /app/login.html
+COPY style.css /app/style.css
+COPY entrypoint.sh /entrypoint.sh
+COPY requirements.txt /app/requirements.txt
 
+# Install Python dependencies
+RUN pip3 install -r /app/requirements.txt
+
+# Make entrypoint executable
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8080
+EXPOSE 443 80 8080
+
 ENTRYPOINT ["/entrypoint.sh"]
