@@ -7,9 +7,10 @@ import io
 import base64
 import os
 import subprocess
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'change-this-secret-key')
+app.secret_key = os.environ.get('SECRET_KEY', 'zone-secret-key-change-me')
 
 ADMIN_USERNAME = os.environ.get('ADMIN_USER', 'admin')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASS', 'admin123')
@@ -17,7 +18,7 @@ XRAY_CONFIG_PATH = '/usr/local/etc/xray/config.json'
 RAILWAY_DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'localhost')
 WORKER_DOMAIN = os.environ.get('WORKER_DOMAIN', 'your-worker.workers.dev')
 
-# خواندن فایل‌های HTML
+# خواندن فایل‌ها
 with open('/login.html', 'r', encoding='utf-8') as f:
     LOGIN_HTML = f.read()
 
@@ -26,6 +27,9 @@ with open('/dashboard.html', 'r', encoding='utf-8') as f:
 
 with open('/style.css', 'r', encoding='utf-8') as f:
     CSS_STYLE = f.read()
+
+with open('/zone.js', 'r', encoding='utf-8') as f:
+    ZONE_JS = f.read()
 
 def login_required(f):
     @wraps(f)
@@ -53,7 +57,7 @@ def login():
            request.form.get('password') == ADMIN_PASSWORD:
             session['logged_in'] = True
             return redirect('/dashboard')
-        error = 'نام کاربری یا رمز عبور اشتباه است'
+        error = 'Invalid credentials'
     
     return render_template_string(LOGIN_HTML, error=error, css=CSS_STYLE)
 
@@ -67,7 +71,7 @@ def logout():
 def dashboard():
     config = load_config()
     clients = config['inbounds'][0]['settings']['clients']
-    return render_template_string(DASHBOARD_HTML, clients=clients, css=CSS_STYLE)
+    return render_template_string(DASHBOARD_HTML, clients=clients, css=CSS_STYLE, js=ZONE_JS)
 
 @app.route('/api/clients')
 @login_required
@@ -76,7 +80,12 @@ def get_clients():
     clients = config['inbounds'][0]['settings']['clients']
     
     for client in clients:
-        client['vless_link'] = generate_vless_link(client['id'], client.get('email', 'Unknown'))
+        client_ip = client.get('cleanip', WORKER_DOMAIN)
+        client['vless_link'] = generate_vless_link(
+            client['id'], 
+            client.get('email', 'Unknown'),
+            client_ip
+        )
         client['qr_code'] = generate_qr_base64(client['vless_link'])
     
     return jsonify(clients)
@@ -85,7 +94,9 @@ def get_clients():
 @login_required
 def add_client():
     data = request.json
-    email = data.get('email', 'user@example.com')
+    email = data.get('email', 'user@zone.local')
+    cleanip = data.get('cleanip', WORKER_DOMAIN)
+    
     client_uuid = str(uuid.uuid4())
     
     config = load_config()
@@ -93,22 +104,61 @@ def add_client():
         "id": client_uuid,
         "email": email,
         "level": 1,
-        "alterId": 0
+        "cleanip": cleanip,
+        "alterId": 0,
+        "created": datetime.utcnow().isoformat(),
+        "enabled": True
     })
     
     save_config(config)
     restart_xray()
     
-    vless_link = generate_vless_link(client_uuid, email)
+    vless_link = generate_vless_link(client_uuid, email, cleanip)
     qr_code = generate_qr_base64(vless_link)
     
     return jsonify({
         'success': True,
         'id': client_uuid,
         'email': email,
+        'cleanip': cleanip,
         'vless_link': vless_link,
         'qr_code': qr_code
     })
+
+@app.route('/api/clients/bulk', methods=['POST'])
+@login_required
+def bulk_add_clients():
+    data = request.json
+    emails = data.get('emails', [])
+    cleanips = data.get('cleanips', [WORKER_DOMAIN])
+    results = []
+    
+    for i, email in enumerate(emails):
+        cleanip = cleanips[i % len(cleanips)] if cleanips else WORKER_DOMAIN
+        client_uuid = str(uuid.uuid4())
+        
+        config = load_config()
+        config['inbounds'][0]['settings']['clients'].append({
+            "id": client_uuid,
+            "email": email,
+            "level": 1,
+            "cleanip": cleanip,
+            "alterId": 0,
+            "created": datetime.utcnow().isoformat(),
+            "enabled": True
+        })
+        save_config(config)
+        restart_xray()
+        
+        vless_link = generate_vless_link(client_uuid, email, cleanip)
+        results.append({
+            'email': email,
+            'cleanip': cleanip,
+            'vless_link': vless_link,
+            'qr_code': generate_qr_base64(vless_link)
+        })
+    
+    return jsonify({'success': True, 'clients': results})
 
 @app.route('/api/clients/<client_uuid>/delete', methods=['DELETE'])
 @login_required
@@ -122,6 +172,34 @@ def delete_client(client_uuid):
     restart_xray()
     return jsonify({'success': True})
 
+@app.route('/api/clients/<client_uuid>/toggle', methods=['POST'])
+@login_required
+def toggle_client(client_uuid):
+    config = load_config()
+    for client in config['inbounds'][0]['settings']['clients']:
+        if client['id'] == client_uuid:
+            client['enabled'] = not client.get('enabled', True)
+            break
+    save_config(config)
+    restart_xray()
+    return jsonify({'success': True})
+
+@app.route('/api/clients/<client_uuid>/update-ip', methods=['POST'])
+@login_required
+def update_client_ip(client_uuid):
+    data = request.json
+    new_ip = data.get('cleanip')
+    
+    config = load_config()
+    for client in config['inbounds'][0]['settings']['clients']:
+        if client['id'] == client_uuid:
+            client['cleanip'] = new_ip
+            break
+    
+    save_config(config)
+    restart_xray()
+    return jsonify({'success': True})
+
 @app.route('/api/export/<client_uuid>')
 @login_required
 def export_config(client_uuid):
@@ -131,10 +209,12 @@ def export_config(client_uuid):
     if not client:
         return jsonify({'error': 'Not found'}), 404
     
+    client_ip = client.get('cleanip', WORKER_DOMAIN)
+    
     return jsonify({
         "v": "2",
-        "ps": client.get('email', 'VPN'),
-        "add": WORKER_DOMAIN,
+        "ps": client.get('email', 'ZONE VPN'),
+        "add": client_ip,
         "port": "443",
         "id": client_uuid,
         "aid": "0",
@@ -143,7 +223,64 @@ def export_config(client_uuid):
         "host": WORKER_DOMAIN,
         "path": "/ws",
         "tls": "tls",
-        "sni": WORKER_DOMAIN
+        "sni": WORKER_DOMAIN,
+        "alpn": "http/1.1"
+    })
+
+@app.route('/sub/<client_uuid>')
+def subscription(client_uuid):
+    config = load_config()
+    client = next((c for c in config['inbounds'][0]['settings']['clients'] if c['id'] == client_uuid), None)
+    
+    if not client or not client.get('enabled', True):
+        return 'Client not found or disabled', 404
+    
+    client_ip = client.get('cleanip', WORKER_DOMAIN)
+    vless_link = generate_vless_link(client_uuid, client.get('email', 'ZONE'), client_ip)
+    
+    # Encode to Base64 for subscription
+    sub_content = vless_link
+    encoded = base64.b64encode(sub_content.encode()).decode()
+    
+    return encoded, 200, {'Content-Type': 'text/plain'}
+
+@app.route('/api/subscription/<client_uuid>')
+@login_required
+def get_subscription_link(client_uuid):
+    config = load_config()
+    client = next((c for c in config['inbounds'][0]['settings']['clients'] if c['id'] == client_uuid), None)
+    
+    if not client:
+        return jsonify({'error': 'Not found'}), 404
+    
+    # لینک سابسکریپشن از طریق Worker
+    sub_link = f"https://{WORKER_DOMAIN}/sub/{client_uuid}"
+    
+    # یا مستقیم از Railway
+    # sub_link = f"https://{RAILWAY_DOMAIN}/sub/{client_uuid}"
+    
+    return jsonify({
+        'sub_link': sub_link,
+        'encoded': base64.b64encode(sub_link.encode()).decode()
+    })
+
+@app.route('/api/stats')
+@login_required
+def get_stats():
+    config = load_config()
+    clients = config['inbounds'][0]['settings']['clients']
+    
+    total = len(clients)
+    enabled = len([c for c in clients if c.get('enabled', True)])
+    disabled = total - enabled
+    
+    return jsonify({
+        'total_clients': total,
+        'enabled': enabled,
+        'disabled': disabled,
+        'worker_domain': WORKER_DOMAIN,
+        'railway_domain': RAILWAY_DOMAIN,
+        'server_status': 'online'
     })
 
 def load_config():
@@ -158,8 +295,8 @@ def restart_xray():
     os.system('pkill xray')
     subprocess.Popen(['/usr/local/xray/xray', '-config', XRAY_CONFIG_PATH])
 
-def generate_vless_link(uuid, email):
-    return f"vless://{uuid}@{WORKER_DOMAIN}:443?path=%2Fws&security=tls&encryption=none&host={WORKER_DOMAIN}&type=ws&sni={WORKER_DOMAIN}#{email}"
+def generate_vless_link(uuid, email, cleanip):
+    return f"vless://{uuid}@{cleanip}:443?path=%2Fws&security=tls&encryption=none&host={WORKER_DOMAIN}&type=ws&sni={WORKER_DOMAIN}&alpn=http%2F1.1#ZONE-{email}"
 
 def generate_qr_base64(data):
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
