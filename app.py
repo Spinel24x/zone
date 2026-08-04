@@ -33,8 +33,6 @@ ADMIN_USER = os.environ.get('ADMIN_USER', 'admin')
 ADMIN_PASS = os.environ.get('ADMIN_PASS', 'zone2024')
 DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'localhost')
 
-WS_PATH = '/ws'  # مسیر ثابت WebSocket
-
 class User(UserMixin):
     def __init__(self, id, username):
         self.id = id
@@ -50,8 +48,6 @@ def load_config():
     try:
         with open(CONFIG_PATH, 'r') as f:
             config = json.load(f)
-            # اطمینان از path صحیح
-            config['inbounds'][0]['streamSettings']['wsSettings']['path'] = WS_PATH
             return config
     except:
         return create_default_config()
@@ -69,8 +65,10 @@ def create_default_config():
             },
             "streamSettings": {
                 "network": "ws",
+                "security": "none",
                 "wsSettings": {
-                    "path": WS_PATH
+                    "path": "/ws",
+                    "headers": {"Host": ""}
                 }
             }
         }],
@@ -78,7 +76,6 @@ def create_default_config():
     }
 
 def save_config(config):
-    config['inbounds'][0]['streamSettings']['wsSettings']['path'] = WS_PATH
     with open(CONFIG_PATH, 'w') as f:
         json.dump(config, f, indent=2)
     restart_xray()
@@ -96,8 +93,18 @@ def generate_vless_link(client_id, email, cleanip=None):
     else:
         host = DOMAIN
     
-    # path=%2Fws یعنی /ws
-    link = f"vless://{client_id}@{host}:443?encryption=none&security=tls&type=ws&path=%2Fws&host={DOMAIN}&sni={DOMAIN}#{name}-ZONE"
+    # VLESS link with fingerprint, reality settings, full TLS
+    link = (
+        f"vless://{client_id}@{host}:443"
+        f"?encryption=none"
+        f"&security=tls"
+        f"&sni={DOMAIN}"
+        f"&fp=chrome"
+        f"&type=ws"
+        f"&path=%2Fws"
+        f"&host={DOMAIN}"
+        f"#{name}-ZONE"
+    )
     return link
 
 def generate_qr_base64(data):
@@ -297,8 +304,14 @@ def api_export(cid):
                     "streamSettings": {
                         "network": "ws",
                         "security": "tls",
-                        "wsSettings": {"path": WS_PATH},
-                        "tlsSettings": {"serverName": DOMAIN}
+                        "wsSettings": {
+                            "path": "/ws",
+                            "headers": {"Host": DOMAIN}
+                        },
+                        "tlsSettings": {
+                            "serverName": DOMAIN,
+                            "fingerprint": "chrome"
+                        }
                     }
                 }]
             }
