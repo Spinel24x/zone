@@ -69,11 +69,6 @@ def dashboard():
     clients = config['inbounds'][0]['settings']['clients']
     return render_template_string(DASHBOARD_HTML, clients=clients, css=CSS_STYLE)
 
-# WebSocket endpoint برای Xray
-@app.route('/ws')
-def websocket_proxy():
-    return 'WebSocket endpoint', 200
-
 @app.route('/api/clients')
 @login_required
 def get_clients():
@@ -176,5 +171,4 @@ def generate_qr_base64(data):
     return base64.b64encode(buffered.getvalue()).decode()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='127.0.0.1', port=5000, debug=False)
