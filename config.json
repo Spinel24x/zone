@@ -11,12 +11,9 @@
     "streamSettings": {
       "network": "ws",
       "wsSettings": {
-        "path": "/ws"
+        "path": "/"
       }
     }
   }],
-  "outbounds": [{
-    "protocol": "freedom",
-    "tag": "direct"
-  }]
+  "outbounds": [{"protocol": "freedom", "tag": "direct"}]
 }
