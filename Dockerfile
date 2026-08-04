@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# نصب دستی Xray (بدون systemd)
 RUN mkdir -p /usr/local/xray && \
     cd /tmp && \
     wget https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
@@ -29,5 +28,5 @@ COPY style.css /style.css
 
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8080 5000
+EXPOSE 8080
 ENTRYPOINT ["/entrypoint.sh"]
