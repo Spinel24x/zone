@@ -1,29 +1,22 @@
 #!/bin/bash
-set -e
 
-RAILWAY_PORT=${PORT:-8080}
-
-echo "========================================="
-echo "🚀 ZONE Tunnel Starting..."
-echo "Port: $RAILWAY_PORT"
-echo "========================================="
-
-echo "[1/3] Starting Xray (port 8081)..."
-/usr/local/xray/xray run -config /usr/local/etc/xray/config.json &
-sleep 3
-
-if pgrep -x xray > /dev/null; then
-    echo "✅ Xray PID: $(pgrep xray)"
-else
-    echo "❌ Xray failed!"
-    exit 1
+# Generate self-signed certificate for development
+if [ ! -f /app/cert.pem ]; then
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout /app/key.pem \
+        -out /app/cert.pem \
+        -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
 fi
 
-echo "[2/3] Starting Flask (port 5000)..."
-cd /app
-PORT=5000 python3 /app/app.py &
-sleep 2
+# Start Xray in background
+echo "Starting Xray..."
+/usr/bin/xray run -config /etc/xray/config.json &
 
-echo "[3/3] Starting Nginx (port $RAILWAY_PORT)..."
-sed -i "s/listen 8080/listen $RAILWAY_PORT/g" /etc/nginx/sites-available/default
-exec nginx -g 'daemon off;'
+# Start Python management panel
+echo "Starting Management Panel..."
+cd /app
+python3 app.py &
+
+# Start Nginx
+echo "Starting Nginx..."
+nginx -g "daemon off;"
