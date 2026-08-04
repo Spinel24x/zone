@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>داشبورد</title>
+    <style>
+        {{ css | safe }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 پنل مدیریت Vless</h1>
+            <a href="/logout" class="btn btn-danger">خروج</a>
+        </div>
+        
+        <div class="add-form">
+            <input type="email" id="emailInput" placeholder="ایمیل یا نام کاربر">
+            <button class="btn" onclick="addClient()">➕ افزودن کاربر</button>
+        </div>
+        
+        <div class="clients-grid" id="clientsGrid">
+            {% for client in clients %}
+            <div class="client-card" id="client-{{ client.id }}">
+                <h3>👤 {{ client.get('email', 'Unknown') }}</h3>
+                <div class="client-info">
+                    <p><span>UUID:</span> <small>{{ client.id }}</small></p>
+                    <div class="link-box" id="link-{{ client.id }}">در حال بارگذاری...</div>
+                </div>
+                <div class="qr-code" id="qr-{{ client.id }}"></div>
+                <div class="actions">
+                    <button class="btn copy-btn" onclick="copyLink('{{ client.id }}')">📋 کپی لینک</button>
+                    <button class="btn btn-success" onclick="exportConfig('{{ client.id }}')">📥 خروجی JSON</button>
+                    <button class="btn btn-danger" onclick="deleteClient('{{ client.id }}')">🗑️ حذف</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <div class="toast" id="toast">✅ کپی شد!</div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', loadClients);
+        
+        async function loadClients() {
+            const response = await fetch('/api/clients');
+            const clients = await response.json();
+            
+            clients.forEach(client => {
+                const linkBox = document.getElementById(`link-${client.id}`);
+                const qrBox = document.getElementById(`qr-${client.id}`);
+                
+                if (linkBox) linkBox.textContent = client.vless_link;
+                if (qrBox && client.qr_code) {
+                    qrBox.innerHTML = `<img src="data:image/png;base64,${client.qr_code}" width="150">`;
+                }
+            });
+        }
+        
+        async function addClient() {
+            const email = document.getElementById('emailInput').value || 'user@example.com';
+            const response = await fetch('/api/clients/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email: email})
+            });
+            if (response.ok) location.reload();
+        }
+        
+        async function deleteClient(uuid) {
+            if (!confirm('آیا از حذف این کاربر مطمئن هستید؟')) return;
+            const response = await fetch(`/api/clients/${uuid}/delete`, {method: 'DELETE'});
+            if (response.ok) document.getElementById(`client-${uuid}`).remove();
+        }
+        
+        function copyLink(uuid) {
+            const link = document.getElementById(`link-${uuid}`).textContent;
+            navigator.clipboard.writeText(link);
+            const toast = document.getElementById('toast');
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 2000);
+        }
+        
+        async function exportConfig(uuid) {
+            const response = await fetch(`/api/export/${uuid}`);
+            const config = await response.json();
+            const blob = new Blob([JSON.stringify(config, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `vless-${uuid.substring(0, 8)}.json`;
+            a.click();
+        }
+    </script>
+</body>
+</html>
