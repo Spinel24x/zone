@@ -1,292 +1,346 @@
-from flask import Flask, render_template_string, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from functools import wraps
 import subprocess
 import os
 import json
+import uuid
+import qrcode
+from io import BytesIO
+import base64
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'zone-secret-key-change-me-2024')
 
-HTML_TEMPLATE = '''
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZoneTunnel | تانل شخصی</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, sans-serif;
-            background: #0a0a0a;
-            color: #e0e0e0;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
+# Flask-Login setup
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# Load CSS
+with open('style.css', 'r', encoding='utf-8') as f:
+    CSS = f.read()
+
+# Load Zone JS
+with open('zone.js', 'r', encoding='utf-8') as f:
+    ZONE_JS = f.read()
+
+# Config path
+CONFIG_PATH = '/usr/local/etc/xray/config.json'
+USERS_FILE = '/data/users.json'
+
+# Default admin
+ADMIN_USERNAME = os.environ.get('ADMIN_USER', 'admin')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASS', 'zone2024')
+
+# Ensure data directory
+os.makedirs('/data', exist_ok=True)
+if not os.path.exists(USERS_FILE):
+    with open(USERS_FILE, 'w') as f:
+        json.dump([], f)
+
+# Domain
+DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'localhost')
+RAILWAY_PORT = os.environ.get('PORT', '8080')
+
+class User(UserMixin):
+    def __init__(self, id, username):
+        self.id = id
+        self.username = username
+
+@login_manager.user_loader
+def load_user(user_id):
+    if user_id == '1':
+        return User('1', ADMIN_USERNAME)
+    return None
+
+def load_config():
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            return json.load(f)
+    except:
+        return {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{
+                "port": 8081,
+                "listen": "127.0.0.1",
+                "protocol": "vless",
+                "settings": {"clients": [], "decryption": "none"},
+                "streamSettings": {"network": "ws", "wsSettings": {"path": "/ws"}}
+            }],
+            "outbounds": [{"protocol": "freedom", "tag": "direct"}]
         }
-        .container {
-            background: #1a1a1a;
-            border-radius: 12px;
-            padding: 30px;
-            width: 100%;
-            max-width: 900px;
-            box-shadow: 0 0 30px rgba(0,255,100,0.1);
-            border: 1px solid #333;
-        }
-        h1 {
-            color: #00ff64;
-            text-align: center;
-            margin-bottom: 10px;
-            font-size: 28px;
-        }
-        .subtitle {
-            text-align: center;
-            color: #888;
-            margin-bottom: 30px;
-        }
-        .status-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 25px;
-            padding: 15px;
-            background: #111;
-            border-radius: 8px;
-        }
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #ff4444;
-        }
-        .dot.active { background: #00ff64; }
-        textarea {
-            width: 100%;
-            min-height: 400px;
-            background: #0d0d0d;
-            color: #00ff64;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 15px;
-            font-family: 'Courier New', monospace;
-            font-size: 14px;
-            resize: vertical;
-            direction: ltr;
-        }
-        .btn-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        button {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 16px;
-            transition: all 0.3s;
-        }
-        .btn-save {
-            background: #00ff64;
-            color: #000;
-        }
-        .btn-save:hover { background: #00cc50; }
-        .btn-refresh {
-            background: #333;
-            color: #fff;
-        }
-        .btn-refresh:hover { background: #444; }
-        .btn-restart {
-            background: #ff4444;
-            color: #fff;
-        }
-        .btn-restart:hover { background: #cc0000; }
-        .message {
-            margin-top: 15px;
-            padding: 10px;
-            border-radius: 5px;
-            text-align: center;
-            display: none;
-        }
-        .message.success { background: #0a3d0a; color: #00ff64; display: block; }
-        .message.error { background: #3d0a0a; color: #ff4444; display: block; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>⚡ ZoneTunnel</h1>
-        <p class="subtitle">مدیریت کانفیگ Xray</p>
+
+def save_config(config):
+    with open(CONFIG_PATH, 'w') as f:
+        json.dump(config, f, indent=2)
+    restart_xray_service()
+
+def restart_xray_service():
+    subprocess.run(['pkill', '-x', 'xray'], capture_output=True)
+    subprocess.Popen(['/usr/local/xray/xray', '-config', CONFIG_PATH])
+
+def load_users():
+    try:
+        with open(USERS_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_users(users):
+    with open(USERS_FILE, 'w') as f:
+        json.dump(users, f, indent=2)
+
+def generate_vless_link(client_id, email, cleanip=None):
+    host = DOMAIN
+    sni = DOMAIN
+    
+    name = email.split('@')[0] if '@' in email else email
+    
+    if cleanip and cleanip.strip():
+        host = cleanip.strip()
+    
+    link = f"vless://{client_id}@{host}:443?encryption=none&security=tls&type=ws&path=%2Fws&host={DOMAIN}&sni={DOMAIN}#{name}-ZONE"
+    return link
+
+def generate_qr_base64(data):
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#00ff88", back_color="#0a0a0a")
+    
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
         
-        <div class="status-bar">
-            <div class="status-indicator">
-                <div class="dot" id="statusDot"></div>
-                <span id="statusText">در حال بررسی...</span>
-            </div>
-            <button class="btn-restart" onclick="restartXray()">🔄 ریستارت Xray</button>
-        </div>
-        
-        <textarea id="configEditor" placeholder="در حال بارگذاری کانفیگ..."></textarea>
-        
-        <div class="btn-group">
-            <button class="btn-save" onclick="saveConfig()">💾 ذخیره کانفیگ</button>
-            <button class="btn-refresh" onclick="loadConfig()">🔄 بارگذاری مجدد</button>
-        </div>
-        
-        <div id="message" class="message"></div>
-    </div>
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            user = User('1', username)
+            login_user(user)
+            return redirect(url_for('dashboard'))
+        else:
+            error = 'Invalid credentials'
+    
+    return render_template('login.html', css=CSS, error=error)
 
-    <script>
-        async function loadConfig() {
-            try {
-                const res = await fetch('/api/config');
-                const data = await res.json();
-                if (data.error) {
-                    showMessage('⚠️ ' + data.error, 'error');
-                } else {
-                    document.getElementById('configEditor').value = data.content;
-                    showMessage('✅ کانفیگ بارگذاری شد', 'success');
-                }
-            } catch (e) {
-                showMessage('❌ خطا در بارگذاری', 'error');
-            }
-            checkStatus();
-        }
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
 
-        async function saveConfig() {
-            const content = document.getElementById('configEditor').value;
-            try {
-                const res = await fetch('/api/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content })
-                });
-                const data = await res.json();
-                if (data.error) {
-                    showMessage('❌ ' + data.error, 'error');
-                } else {
-                    showMessage('✅ کانفیگ ذخیره و Xray ریستارت شد', 'success');
-                }
-            } catch (e) {
-                showMessage('❌ خطا در ذخیره', 'error');
-            }
-            checkStatus();
-        }
-
-        async function restartXray() {
-            try {
-                const res = await fetch('/api/restart', { method: 'POST' });
-                const data = await res.json();
-                showMessage(data.message || '✅ Xray ریستارت شد', 'success');
-            } catch (e) {
-                showMessage('❌ خطا در ریستارت', 'error');
-            }
-            setTimeout(checkStatus, 2000);
-        }
-
-        async function checkStatus() {
-            try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                const dot = document.getElementById('statusDot');
-                const text = document.getElementById('statusText');
-                if (data.xray_running) {
-                    dot.classList.add('active');
-                    text.textContent = 'Xray فعال است';
-                } else {
-                    dot.classList.remove('active');
-                    text.textContent = 'Xray غیرفعال است';
-                }
-            } catch (e) {
-                document.getElementById('statusText').textContent = 'عدم اتصال';
-            }
-        }
-
-        function showMessage(msg, type) {
-            const el = document.getElementById('message');
-            el.textContent = msg;
-            el.className = 'message ' + type;
-            setTimeout(() => { el.className = 'message'; }, 4000);
-        }
-
-        loadConfig();
-        setInterval(checkStatus, 10000);
-    </script>
-</body>
-</html>
-'''
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    config = load_config()
+    clients = config['inbounds'][0]['settings']['clients']
+    
+    for client in clients:
+        if 'cleanip' not in client:
+            client['cleanip'] = ''
+        if 'enabled' not in client:
+            client['enabled'] = True
+    
+    return render_template('dashboard.html', 
+                         css=CSS, 
+                         js=ZONE_JS,
+                         clients=clients,
+                         domain=DOMAIN)
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return redirect(url_for('dashboard'))
 
-@app.route('/api/config', methods=['GET'])
-def get_config():
-    try:
-        if not os.path.exists('/usr/local/etc/xray/config.json'):
-            return jsonify({'error': 'فایل کانفیگ پیدا نشد'}), 404
-        
-        with open('/usr/local/etc/xray/config.json', 'r', encoding='utf-8') as f:
-            content = f.read()
-        return jsonify({'content': content})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+@app.route('/api/clients', methods=['GET'])
+@login_required
+def get_clients():
+    config = load_config()
+    clients = config['inbounds'][0]['settings']['clients']
+    
+    result = []
+    for client in clients:
+        link = generate_vless_link(client['id'], client.get('email', ''), client.get('cleanip', ''))
+        qr = generate_qr_base64(link)
+        result.append({
+            'id': client['id'],
+            'email': client.get('email', 'Unknown'),
+            'cleanip': client.get('cleanip', ''),
+            'enabled': client.get('enabled', True),
+            'link': link,
+            'qr': qr,
+            'subscription': f"https://{DOMAIN}/sub/{client['id']}"
+        })
+    
+    return jsonify(result)
 
-@app.route('/api/config', methods=['POST'])
-def save_config():
+@app.route('/api/clients/add', methods=['POST'])
+@login_required
+def add_client():
     try:
         data = request.json
-        if not data or 'content' not in data:
-            return jsonify({'error': 'محتوای کانفیگ ارسال نشده'}), 400
+        email = data.get('email', f'user{uuid.uuid4().hex[:8]}@zone.local')
+        cleanip = data.get('cleanip', '')
         
-        # اعتبارسنجی JSON
-        try:
-            json.loads(data['content'])
-        except json.JSONDecodeError:
-            return jsonify({'error': 'فرمت JSON نامعتبر است'}), 400
+        client_id = str(uuid.uuid4())
         
-        # بکاپ از کانفیگ قبلی
-        if os.path.exists('/usr/local/etc/xray/config.json'):
-            os.rename('/usr/local/etc/xray/config.json', '/usr/local/etc/xray/config.json.bak')
+        config = load_config()
+        config['inbounds'][0]['settings']['clients'].append({
+            'id': client_id,
+            'email': email,
+            'level': 0,
+            'cleanip': cleanip,
+            'enabled': True
+        })
+        save_config(config)
         
-        with open('/usr/local/etc/xray/config.json', 'w', encoding='utf-8') as f:
-            f.write(data['content'])
+        link = generate_vless_link(client_id, email, cleanip)
+        qr = generate_qr_base64(link)
         
-        # ریستارت xray
-        subprocess.run(['pkill', '-x', 'xray'], capture_output=True)
-        subprocess.Popen(['/usr/local/xray/xray', '-config', '/usr/local/etc/xray/config.json'])
-        
-        return jsonify({'message': 'کانفیگ ذخیره و Xray ریستارت شد'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/status')
-def status():
-    try:
-        result = subprocess.run(['pgrep', '-x', 'xray'], capture_output=True)
-        xray_running = result.returncode == 0
-        config_exists = os.path.exists('/usr/local/etc/xray/config.json')
         return jsonify({
-            'xray_running': xray_running,
-            'config_exists': config_exists
+            'success': True,
+            'client': {
+                'id': client_id,
+                'email': email,
+                'cleanip': cleanip,
+                'link': link,
+                'qr': qr,
+                'subscription': f"https://{DOMAIN}/sub/{client_id}"
+            }
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/restart', methods=['POST'])
-def restart_xray():
+@app.route('/api/clients/bulk-add', methods=['POST'])
+@login_required
+def bulk_add_clients():
     try:
-        subprocess.run(['pkill', '-x', 'xray'], capture_output=True)
-        subprocess.Popen(['/usr/local/xray/xray', '-config', '/usr/local/etc/xray/config.json'])
-        return jsonify({'message': 'Xray ریستارت شد'})
+        data = request.json
+        emails = data.get('emails', '').strip().split('\n')
+        cleanips = data.get('cleanips', '').strip().split('\n')
+        
+        emails = [e.strip() for e in emails if e.strip()]
+        cleanips = [c.strip() for c in cleanips if c.strip()]
+        
+        config = load_config()
+        added = []
+        
+        for i, email in enumerate(emails):
+            client_id = str(uuid.uuid4())
+            cleanip = cleanips[i] if i < len(cleanips) else ''
+            
+            config['inbounds'][0]['settings']['clients'].append({
+                'id': client_id,
+                'email': email,
+                'level': 0,
+                'cleanip': cleanip,
+                'enabled': True
+            })
+            
+            link = generate_vless_link(client_id, email, cleanip)
+            qr = generate_qr_base64(link)
+            added.append({
+                'id': client_id,
+                'email': email,
+                'cleanip': cleanip,
+                'link': link,
+                'qr': qr,
+                'subscription': f"https://{DOMAIN}/sub/{client_id}"
+            })
+        
+        save_config(config)
+        return jsonify({'success': True, 'clients': added})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/clients/<client_id>/delete', methods=['DELETE'])
+@login_required
+def delete_client(client_id):
+    try:
+        config = load_config()
+        clients = config['inbounds'][0]['settings']['clients']
+        config['inbounds'][0]['settings']['clients'] = [c for c in clients if c['id'] != client_id]
+        save_config(config)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/clients/<client_id>/toggle', methods=['POST'])
+@login_required
+def toggle_client(client_id):
+    try:
+        config = load_config()
+        clients = config['inbounds'][0]['settings']['clients']
+        for client in clients:
+            if client['id'] == client_id:
+                client['enabled'] = not client.get('enabled', True)
+                break
+        save_config(config)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/sub/<client_id>')
+def subscription(client_id):
+    config = load_config()
+    clients = config['inbounds'][0]['settings']['clients']
+    
+    for client in clients:
+        if client['id'] == client_id:
+            link = generate_vless_link(client['id'], client.get('email', ''), client.get('cleanip', ''))
+            return f"{link}\n", 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    
+    return "Client not found", 404
+
+@app.route('/api/status')
+@login_required
+def status():
+    try:
+        result = subprocess.run(['pgrep', '-x', 'xray'], capture_output=True)
+        xray_running = result.returncode == 0
+        config = load_config()
+        total_clients = len(config['inbounds'][0]['settings']['clients'])
+        return jsonify({
+            'xray_running': xray_running,
+            'total_clients': total_clients
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/export/<client_id>')
+@login_required
+def export_config(client_id):
+    config = load_config()
+    clients = config['inbounds'][0]['settings']['clients']
+    
+    for client in clients:
+        if client['id'] == client_id:
+            client_config = {
+                "dns": {"servers": ["1.1.1.1", "8.8.8.8"]},
+                "inbounds": [{"port": 10808, "listen": "127.0.0.1", "protocol": "socks"}],
+                "outbounds": [{
+                    "protocol": "vless",
+                    "settings": {"vnext": [{
+                        "address": DOMAIN,
+                        "port": 443,
+                        "users": [{"id": client['id'], "encryption": "none", "level": 0}]
+                    }]},
+                    "streamSettings": {
+                        "network": "ws",
+                        "security": "tls",
+                        "wsSettings": {"path": "/ws"},
+                        "tlsSettings": {"serverName": DOMAIN}
+                    }
+                }]
+            }
+            return jsonify(client_config)
+    
+    return jsonify({'error': 'Client not found'}), 404
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
