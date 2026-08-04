@@ -5,9 +5,17 @@ RUN apt-get update && apt-get install -y \
     unzip \
     python3 \
     python3-pip \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-RUN bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+# نصب دستی Xray (بدون systemd)
+RUN mkdir -p /usr/local/xray && \
+    cd /tmp && \
+    wget https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
+    unzip Xray-linux-64.zip -d /usr/local/xray && \
+    chmod +x /usr/local/xray/xray && \
+    rm Xray-linux-64.zip && \
+    mkdir -p /usr/local/etc/xray
 
 COPY requirements.txt /tmp/
 RUN pip3 install -r /tmp/requirements.txt
