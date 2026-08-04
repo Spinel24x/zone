@@ -19,6 +19,9 @@ RUN mkdir -p /usr/local/xray && \
     rm Xray-linux-64.zip && \
     mkdir -p /usr/local/etc/xray
 
+# ساخت پوشه‌های templates و static
+RUN mkdir -p /app/templates /app/static
+
 COPY requirements.txt /tmp/
 RUN pip3 install -r /tmp/requirements.txt
 
@@ -26,10 +29,10 @@ COPY nginx.conf /etc/nginx/sites-available/default
 COPY entrypoint.sh /entrypoint.sh
 COPY config.json /usr/local/etc/xray/config.json
 COPY app.py /app/app.py
-COPY login.html /app/login.html
-COPY dashboard.html /app/dashboard.html
-COPY style.css /app/style.css
-COPY zone.js /app/zone.js
+COPY login.html /app/templates/login.html
+COPY dashboard.html /app/templates/dashboard.html
+COPY style.css /app/static/style.css
+COPY zone.js /app/static/zone.js
 
 RUN chmod +x /entrypoint.sh
 
