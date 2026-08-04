@@ -1,24 +1,131 @@
 <!DOCTYPE html>
-<html dir="rtl" lang="fa">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ورود به پنل</title>
-    <style>
-        {{ css | safe }}
-    </style>
+    <title>ZONE | Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>{{ css | safe }}</style>
 </head>
 <body>
+    <canvas id="hexCanvas"></canvas>
     <div class="login-box">
-        <h2>🔐 پنل مدیریت VPN</h2>
+        <div class="logo">
+            <span class="logo-text">ZONE</span>
+            <span class="logo-subtitle">VPN Management</span>
+        </div>
         {% if error %}
         <div class="error">{{ error }}</div>
         {% endif %}
         <form method="POST">
-            <input type="text" name="username" placeholder="نام کاربری" required>
-            <input type="password" name="password" placeholder="رمز عبور" required>
-            <button type="submit">ورود</button>
+            <input type="text" name="username" placeholder="Username" required autocomplete="off">
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">ACCESS PANEL</button>
         </form>
+        <div class="footer-text">Secured by Cloudflare</div>
     </div>
+    <script>
+        const canvas = document.getElementById('hexCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        let particles = [];
+        const mouse = { x: -1000, y: -1000 };
+        
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.size = Math.random() * 3 + 1;
+                this.speedX = (Math.random() - 0.5) * 0.5;
+                this.speedY = (Math.random() - 0.5) * 0.5;
+                this.opacity = Math.random() * 0.5 + 0.1;
+            }
+            update() {
+                const dx = mouse.x - this.x;
+                const dy = mouse.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < 200) {
+                    this.x += dx * 0.01;
+                    this.y += dy * 0.01;
+                }
+                
+                this.x += this.speedX;
+                this.y += this.speedY;
+                
+                if (this.x < 0 || this.x > canvas.width) this.speedX *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.speedY *= -1;
+            }
+            draw() {
+                ctx.fillStyle = `rgba(0, 255, 136, ${this.opacity})`;
+                ctx.beginPath();
+                const hexSize = this.size * 2;
+                for (let i = 0; i < 6; i++) {
+                    const angle = (i * Math.PI) / 3;
+                    const x = this.x + hexSize * Math.cos(angle);
+                    const y = this.y + hexSize * Math.sin(angle);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+        
+        function init() {
+            particles = [];
+            for (let i = 0; i < 80; i++) {
+                particles.push(new Particle());
+            }
+        }
+        
+        function animate() {
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+            
+            // Draw connections
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 100) {
+                        ctx.strokeStyle = `rgba(0, 255, 136, ${0.1 * (1 - dist / 100)})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        document.addEventListener('mousemove', (e) => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+        });
+        
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        init();
+        animate();
+    </script>
 </body>
 </html>
