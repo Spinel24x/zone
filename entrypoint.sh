@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Railway پورت رو از طریق متغیر محیطی PORT میده
 RAILWAY_PORT=${PORT:-8080}
 
 echo "========================================="
@@ -13,7 +12,8 @@ echo "[1/3] Starting Xray on port 8081..."
 sleep 2
 
 echo "[2/3] Starting Flask on port 5000..."
-PORT=5000 python3 /app.py &
+cd /app
+PORT=5000 python3 /app/app.py &
 sleep 2
 
 echo "[3/3] Starting Nginx on port $RAILWAY_PORT..."
