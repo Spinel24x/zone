@@ -1,28 +1,22 @@
-FROM teddysun/xray:latest
+FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    nginx \
-    openssl \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY config.json /etc/xray/config.json
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY app.py /app/app.py
-COPY requirements.txt /app/requirements.txt
-COPY dashboard.html /app/templates/dashboard.html
-COPY login.html /app/templates/login.html
-COPY style.css /app/static/style.css
-COPY entrypoint.sh /entrypoint.sh
+RUN curl -sL https://github.com/XTLS/Xray-core/releases/download/v1.8.21/Xray-linux-64.zip -o /tmp/xray.zip && \
+    unzip /tmp/xray.zip -d /usr/local/bin/ && \
+    rm /tmp/xray.zip && \
+    chmod +x /usr/local/bin/xray
 
-RUN pip3 install --break-system-packages -r /app/requirements.txt
+WORKDIR /app
 
-RUN chmod +x /entrypoint.sh
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /app/templates /app/static
+COPY . .
 
-EXPOSE 443 80 5000
+RUN mkdir -p /app/configs /app/data
 
-ENTRYPOINT ["/entrypoint.sh"]
+EXPOSE 8000
+
+CMD ["python", "main.py"]
