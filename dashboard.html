@@ -13,7 +13,6 @@
     <canvas id="hexCanvas"></canvas>
 
     <div class="container">
-        <!-- HEADER -->
         <div class="header">
             <div class="header-left">
                 <h1>⚡ ZONE</h1>
@@ -34,11 +33,10 @@
             </div>
         </div>
 
-        <!-- ADD SECTION -->
         <div class="add-section">
             <div class="section-title">➕ Add Client</div>
             <div class="add-form">
-                <input type="text" id="emailInput" placeholder="Email (optional - auto-generated)" autocomplete="off">
+                <input type="text" id="emailInput" placeholder="Email (optional)" autocomplete="off">
                 <input type="text" id="cleanipInput" placeholder="Clean IP (optional)" autocomplete="off">
                 <button class="btn btn-primary" onclick="addClient()">ADD</button>
             </div>
@@ -50,7 +48,6 @@
             </div>
         </div>
 
-        <!-- CLIENTS GRID -->
         <div class="clients-grid" id="clientsGrid">
             {% for client in clients %}
             <div class="client-card" id="card-{{ client.id }}">
@@ -65,7 +62,7 @@
                     </div>
                     <div class="info-row">
                         <span class="info-label">Path:</span>
-                        <code>/{{ client.id }}</code>
+                        <code>/ws</code>
                     </div>
                     {% if client.get('cleanip') %}
                     <div class="info-row">
@@ -164,7 +161,6 @@
                 await navigator.clipboard.writeText(text);
                 showToast('📋 Copied!');
             } catch {
-                // Fallback
                 const ta = document.createElement('textarea');
                 ta.value = text;
                 document.body.appendChild(ta);
@@ -179,8 +175,6 @@
             const subBox = document.getElementById('sub-' + id);
             const subLink = document.getElementById('sub-link-' + id);
             if (subBox.style.display === 'none' || !subLink.textContent) {
-                const res = await fetch(`/sub/${id}`);
-                const text = await res.text();
                 subLink.textContent = `https://${DOMAIN}/sub/${id}`;
                 subBox.style.display = 'block';
             }
@@ -206,7 +200,6 @@
             showToast('📥 Downloaded!');
         }
 
-        // Load all links & QRs on page load
         async function loadAllLinks() {
             const res = await fetch('/api/clients');
             const clients = await res.json();
@@ -218,7 +211,6 @@
             });
         }
 
-        // Status check
         async function checkStatus() {
             try {
                 const res = await fetch('/api/status');
