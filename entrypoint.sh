@@ -1,10 +1,21 @@
 #!/bin/bash
 
-# Xray روی پورت 8081 (داخلی - فقط برای Nginx)
+# Railway پورت رو از طریق متغیر محیطی PORT میده
+RAILWAY_PORT=${PORT:-8080}
+
+echo "========================================="
+echo "🚀 ZoneTunnel Starting..."
+echo "Port: $RAILWAY_PORT"
+echo "========================================="
+
+echo "[1/3] Starting Xray on port 8081..."
 /usr/local/xray/xray -config /usr/local/etc/xray/config.json &
+sleep 2
 
-# Flask روی پورت 5000 (داخلی - فقط برای Nginx)
-python3 /app.py &
+echo "[2/3] Starting Flask on port 5000..."
+PORT=5000 python3 /app.py &
+sleep 2
 
-# Nginx روی پورت 8080 (عمومی)
+echo "[3/3] Starting Nginx on port $RAILWAY_PORT..."
+sed -i "s/listen 8080/listen $RAILWAY_PORT/g" /etc/nginx/sites-available/default
 nginx -g 'daemon off;'
