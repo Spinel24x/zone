@@ -1,168 +1,73 @@
 <!DOCTYPE html>
-<html dir="rtl" lang="fa">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>داشبورد مدیریت VLESS</title>
+    <title>Dashboard - VLESS Panel</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="dashboard-container">
-        <header>
-            <h1>🚀 داشبورد مدیریت VLESS</h1>
-            <a href="/logout" class="btn-logout">خروج</a>
+    <div class="container">
+        <header class="main-header">
+            <h1>🚀 VLESS Panel</h1>
+            <div class="header-actions">
+                <span id="userDisplay"></span>
+                <span id="cfStatus"></span>
+                <button class="btn-logout" onclick="doLogout()">🚪 Logout</button>
+            </div>
         </header>
 
-        <div class="server-info">
-            <h2>اطلاعات سرور</h2>
-            <div id="serverDetails">در حال بارگذاری...</div>
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="configs">📡 Configs</button>
+            <button class="tab-btn" data-tab="users">👥 Users</button>
+            <button class="tab-btn" data-tab="me">👤 My Account</button>
         </div>
 
-        <div class="add-client-section">
-            <h2>افزودن کاربر جدید</h2>
-            <form id="addClientForm">
-                <div class="form-group">
-                    <label>نام کاربری</label>
-                    <input type="text" id="email" placeholder="مثلاً: user1">
-                </div>
-                <div class="form-group">
-                    <label>UUID (اختیاری)</label>
-                    <input type="text" id="uuid" placeholder="خالی بگذارید تا خودکار ساخته شود">
-                </div>
-                <button type="submit" class="btn-add">افزودن کاربر</button>
-            </form>
+        <!-- Configs Tab -->
+        <div class="tab-panel active" id="tab-configs">
+            <div class="card">
+                <h3>➕ Create New Config</h3>
+                <form id="addConfigForm" class="inline-form">
+                    <input type="text" id="cfgName" placeholder="Config Name">
+                    <input type="text" id="cfgRemarks" placeholder="Remarks (shown in VLESS link)">
+                    <input type="number" id="cfgTraffic" placeholder="Traffic Limit (GB)" value="0" min="0">
+                    <input type="number" id="cfgExpire" placeholder="Expire (Days)" value="0" min="0">
+                    <button type="submit" class="btn-primary">Create</button>
+                </form>
+            </div>
+            <div class="card">
+                <h3>📋 Configs List</h3>
+                <div id="configsList">Loading...</div>
+            </div>
         </div>
 
-        <div class="clients-list">
-            <h2>کاربران فعال</h2>
-            <div id="clientsTable">در حال بارگذاری...</div>
+        <!-- Users Tab -->
+        <div class="tab-panel" id="tab-users">
+            <div class="card">
+                <h3>➕ Add User</h3>
+                <form id="addUserForm" class="inline-form">
+                    <input type="text" id="newUsername" placeholder="Username" required>
+                    <input type="password" id="newPassword" placeholder="Password" required>
+                    <input type="number" id="assignConfigId" placeholder="Config ID (optional)">
+                    <button type="submit" class="btn-primary">Add User</button>
+                </form>
+            </div>
+            <div class="card">
+                <h3>👥 Users List</h3>
+                <div id="usersList">Loading...</div>
+            </div>
         </div>
 
-        <div id="configModal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h3>کانفیگ VLESS</h3>
-                <pre id="configText"></pre>
-                <button class="btn-copy" onclick="copyConfig()">کپی کانفیگ</button>
+        <!-- My Account Tab -->
+        <div class="tab-panel" id="tab-me">
+            <div class="card">
+                <h3>🔗 My VLESS Config</h3>
+                <div id="myConfig">Loading...</div>
             </div>
         </div>
     </div>
 
-    <script>
-        async function loadServerInfo() {
-            try {
-                const res = await fetch('/api/server_info');
-                const data = await res.json();
-                document.getElementById('serverDetails').innerHTML = `
-                    <p><strong>دامنه Worker:</strong> <code>${data.worker_domain}</code></p>
-                    <p><strong>دامنه سرور:</strong> <code>${data.server_domain}</code></p>
-                    <p><strong>پورت:</strong> ${data.port}</p>
-                    <p><strong>نوع انتقال:</strong> ${data.network}</p>
-                    <p><strong>مسیر:</strong> <code>${data.path}</code></p>
-                    <p><strong>امنیت:</strong> ${data.security}</p>
-                `;
-            } catch(e) {
-                document.getElementById('serverDetails').innerHTML = '<p style="color:red">خطا در بارگذاری اطلاعات سرور</p>';
-            }
-        }
-
-        async function loadClients() {
-            try {
-                const res = await fetch('/api/clients');
-                const data = await res.json();
-                const div = document.getElementById('clientsTable');
-                
-                if (data.clients.length === 0) {
-                    div.innerHTML = '<p>هیچ کاربری وجود ندارد</p>';
-                    return;
-                }
-
-                let html = '<table><tr><th>نام</th><th>UUID</th><th>عملیات</th></tr>';
-                data.clients.forEach(c => {
-                    html += `
-                        <tr>
-                            <td>${c.email}</td>
-                            <td><code>${c.id.substring(0, 12)}...</code></td>
-                            <td>
-                                <button onclick="viewConfig('${c.id}', '${c.email}')" class="btn-view">نمایش کانفیگ</button>
-                                <button onclick="deleteClient('${c.id}')" class="btn-delete">حذف</button>
-                            </td>
-                        </tr>
-                    `;
-                });
-                html += '</table>';
-                div.innerHTML = html;
-            } catch(e) {
-                document.getElementById('clientsTable').innerHTML = '<p style="color:red">خطا در بارگذاری کاربران</p>';
-            }
-        }
-
-        document.getElementById('addClientForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('email').value;
-            const uuid = document.getElementById('uuid').value;
-            
-            const body = {};
-            if (email) body.email = email;
-            if (uuid) body.id = uuid;
-            
-            const res = await fetch('/api/add_client', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body)
-            });
-            
-            const data = await res.json();
-            if (data.success) {
-                alert('کاربر با موفقیت اضافه شد');
-                document.getElementById('email').value = '';
-                document.getElementById('uuid').value = '';
-                loadClients();
-                
-                // Show config immediately
-                document.getElementById('configText').textContent = data.vless_link;
-                document.getElementById('configModal').style.display = 'block';
-            } else {
-                alert('خطا در افزودن کاربر');
-            }
-        });
-
-        async function viewConfig(clientId, email) {
-            const serverRes = await fetch('/api/server_info');
-            const server = await serverRes.json();
-            
-            const link = `vless://${clientId}@${server.worker_domain}:${server.port}?encryption=none&security=${server.security}&sni=${server.server_domain}&type=${server.network}&path=${server.path}&flow=xtls-rprx-vision#${email}`;
-            
-            document.getElementById('configText').textContent = link;
-            document.getElementById('configModal').style.display = 'block';
-        }
-
-        async function deleteClient(id) {
-            if (!confirm('آیا از حذف این کاربر مطمئن هستید؟')) return;
-            
-            await fetch(`/api/delete_client/${id}`, {method: 'DELETE'});
-            loadClients();
-        }
-
-        function copyConfig() {
-            const text = document.getElementById('configText').textContent;
-            navigator.clipboard.writeText(text).then(() => {
-                alert('کانفیگ کپی شد!');
-            });
-        }
-
-        document.querySelector('.close').onclick = () => {
-            document.getElementById('configModal').style.display = 'none';
-        };
-
-        window.onclick = (e) => {
-            if (e.target == document.getElementById('configModal')) {
-                document.getElementById('configModal').style.display = 'none';
-            }
-        };
-
-        loadServerInfo();
-        loadClients();
-    </script>
+    <div class="toast" id="toast"></div>
+    <script src="/static/script.js"></script>
 </body>
 </html>
