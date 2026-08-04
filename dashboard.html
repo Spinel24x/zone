@@ -1,98 +1,88 @@
 <!DOCTYPE html>
-<html dir="rtl" lang="fa">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>داشبورد</title>
-    <style>
-        {{ css | safe }}
-    </style>
+    <title>ZONE | Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>{{ css | safe }}</style>
 </head>
 <body>
+    <canvas id="hexCanvas"></canvas>
+    
     <div class="container">
         <div class="header">
-            <h1>🚀 پنل مدیریت Vless</h1>
-            <a href="/logout" class="btn btn-danger">خروج</a>
+            <div class="header-left">
+                <h1>⚡ ZONE</h1>
+                <span class="status-badge">ONLINE</span>
+            </div>
+            <div class="header-right">
+                <div class="stats-mini">
+                    <div class="stat-item">
+                        <span class="stat-label">Clients</span>
+                        <span class="stat-value" id="totalClients">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Active</span>
+                        <span class="stat-value" id="activeClients">0</span>
+                    </div>
+                </div>
+                <a href="/logout" class="btn btn-danger">EXIT</a>
+            </div>
         </div>
         
-        <div class="add-form">
-            <input type="email" id="emailInput" placeholder="ایمیل یا نام کاربر">
-            <button class="btn" onclick="addClient()">➕ افزودن کاربر</button>
+        <div class="add-section">
+            <div class="add-form">
+                <input type="text" id="emailInput" placeholder="Email or client name..." autocomplete="off">
+                <input type="text" id="cleanipInput" placeholder="Clean IP (1.2.3.4) or use default..." autocomplete="off">
+                <button class="btn btn-primary" onclick="addClient()">➕ ADD CLIENT</button>
+            </div>
+            <div class="bulk-form">
+                <textarea id="bulkEmails" placeholder="Bulk add:&#10;user1@zone.local&#10;user2@zone.local&#10;user3@zone.local" rows="3"></textarea>
+                <textarea id="bulkCleanIPs" placeholder="Clean IPs per line:&#10;1.2.3.4&#10;5.6.7.8&#10;9.10.11.12" rows="3"></textarea>
+                <button class="btn btn-primary" onclick="bulkAddClients()">📦 BULK ADD</button>
+            </div>
         </div>
         
         <div class="clients-grid" id="clientsGrid">
             {% for client in clients %}
             <div class="client-card" id="client-{{ client.id }}">
-                <h3>👤 {{ client.get('email', 'Unknown') }}</h3>
-                <div class="client-info">
-                    <p><span>UUID:</span> <small>{{ client.id }}</small></p>
-                    <div class="link-box" id="link-{{ client.id }}">در حال بارگذاری...</div>
+                <div class="card-header">
+                    <h3>👤 {{ client.get('email', 'Unknown') }}</h3>
+                    <span class="status-dot {% if client.get('enabled', True) %}active{% else %}inactive{% endif %}"></span>
                 </div>
-                <div class="qr-code" id="qr-{{ client.id }}"></div>
-                <div class="actions">
-                    <button class="btn copy-btn" onclick="copyLink('{{ client.id }}')">📋 کپی لینک</button>
-                    <button class="btn btn-success" onclick="exportConfig('{{ client.id }}')">📥 خروجی JSON</button>
-                    <button class="btn btn-danger" onclick="deleteClient('{{ client.id }}')">🗑️ حذف</button>
+                <div class="card-body">
+                    <div class="info-row">
+                        <span class="info-label">UUID:</span>
+                        <code>{{ client.id[:16] }}...</code>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Clean IP:</span>
+                        <code class="cleanip-display">{{ client.get('cleanip', 'Default') }}</code>
+                    </div>
+                    <div class="link-box" id="link-{{ client.id }}">Loading...</div>
+                    <div class="qr-code" id="qr-{{ client.id }}"></div>
+                    <div class="sub-box" id="sub-{{ client.id }}" style="display:none;">
+                        <span class="info-label">Subscription:</span>
+                        <code id="sub-link-{{ client.id }}"></code>
+                    </div>
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-sm" onclick="copyLink('{{ client.id }}')">📋 Copy</button>
+                    <button class="btn btn-sm btn-success" onclick="getSubscription('{{ client.id }}')">🔗 Sub</button>
+                    <button class="btn btn-sm btn-info" onclick="exportConfig('{{ client.id }}')">📥 JSON</button>
+                    <button class="btn btn-sm btn-warning" onclick="toggleClient('{{ client.id }}')">
+                        {% if client.get('enabled', True) %}⏸️{% else %}▶️{% endif %}
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteClient('{{ client.id }}')">🗑️</button>
                 </div>
             </div>
             {% endfor %}
         </div>
     </div>
     
-    <div class="toast" id="toast">✅ کپی شد!</div>
+    <div class="toast" id="toast">✅ Copied!</div>
     
-    <script>
-        document.addEventListener('DOMContentLoaded', loadClients);
-        
-        async function loadClients() {
-            const response = await fetch('/api/clients');
-            const clients = await response.json();
-            
-            clients.forEach(client => {
-                const linkBox = document.getElementById(`link-${client.id}`);
-                const qrBox = document.getElementById(`qr-${client.id}`);
-                
-                if (linkBox) linkBox.textContent = client.vless_link;
-                if (qrBox && client.qr_code) {
-                    qrBox.innerHTML = `<img src="data:image/png;base64,${client.qr_code}" width="150">`;
-                }
-            });
-        }
-        
-        async function addClient() {
-            const email = document.getElementById('emailInput').value || 'user@example.com';
-            const response = await fetch('/api/clients/add', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({email: email})
-            });
-            if (response.ok) location.reload();
-        }
-        
-        async function deleteClient(uuid) {
-            if (!confirm('آیا از حذف این کاربر مطمئن هستید؟')) return;
-            const response = await fetch(`/api/clients/${uuid}/delete`, {method: 'DELETE'});
-            if (response.ok) document.getElementById(`client-${uuid}`).remove();
-        }
-        
-        function copyLink(uuid) {
-            const link = document.getElementById(`link-${uuid}`).textContent;
-            navigator.clipboard.writeText(link);
-            const toast = document.getElementById('toast');
-            toast.style.display = 'block';
-            setTimeout(() => toast.style.display = 'none', 2000);
-        }
-        
-        async function exportConfig(uuid) {
-            const response = await fetch(`/api/export/${uuid}`);
-            const config = await response.json();
-            const blob = new Blob([JSON.stringify(config, null, 2)], {type: 'application/json'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `vless-${uuid.substring(0, 8)}.json`;
-            a.click();
-        }
-    </script>
+    <script>{{ js | safe }}</script>
 </body>
 </html>
