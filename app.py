@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, send_from_directory
 import subprocess
 import os
 import json
@@ -229,31 +229,10 @@ def index():
 @app.route('/api/config', methods=['GET'])
 def get_config():
     try:
-        # اول چک می‌کنیم فایل هست یا نه
-        if not os.path.exists('/zone.js'):
-            # اگه نبود، کانفیگ پیش‌فرض رو می‌سازیم
-            default_config = {
-                "inbounds": [{
-                    "port": 8080,
-                    "protocol": "vmess",
-                    "settings": {
-                        "clients": [{
-                            "id": "b831381d-6324-4d53-ad4f-8cda48b30811",
-                            "level": 0,
-                            "alterId": 0
-                        }]
-                    },
-                    "streamSettings": {
-                        "network": "ws",
-                        "wsSettings": {"path": "/"}
-                    }
-                }],
-                "outbounds": [{"protocol": "freedom", "settings": {}}]
-            }
-            with open('/zone.js', 'w', encoding='utf-8') as f:
-                json.dump(default_config, f, indent=2)
+        if not os.path.exists('/usr/local/etc/xray/config.json'):
+            return jsonify({'error': 'فایل کانفیگ پیدا نشد'}), 404
         
-        with open('/zone.js', 'r', encoding='utf-8') as f:
+        with open('/usr/local/etc/xray/config.json', 'r', encoding='utf-8') as f:
             content = f.read()
         return jsonify({'content': content})
     except Exception as e:
@@ -272,11 +251,16 @@ def save_config():
         except json.JSONDecodeError:
             return jsonify({'error': 'فرمت JSON نامعتبر است'}), 400
         
-        with open('/zone.js', 'w', encoding='utf-8') as f:
+        # بکاپ از کانفیگ قبلی
+        if os.path.exists('/usr/local/etc/xray/config.json'):
+            os.rename('/usr/local/etc/xray/config.json', '/usr/local/etc/xray/config.json.bak')
+        
+        with open('/usr/local/etc/xray/config.json', 'w', encoding='utf-8') as f:
             f.write(data['content'])
         
         # ریستارت xray
         subprocess.run(['pkill', '-x', 'xray'], capture_output=True)
+        subprocess.Popen(['/usr/local/xray/xray', '-config', '/usr/local/etc/xray/config.json'])
         
         return jsonify({'message': 'کانفیگ ذخیره و Xray ریستارت شد'})
     except Exception as e:
@@ -287,21 +271,22 @@ def status():
     try:
         result = subprocess.run(['pgrep', '-x', 'xray'], capture_output=True)
         xray_running = result.returncode == 0
-        zone_exists = os.path.exists('/zone.js')
+        config_exists = os.path.exists('/usr/local/etc/xray/config.json')
         return jsonify({
             'xray_running': xray_running,
-            'zone_exists': zone_exists
+            'config_exists': config_exists
         })
     except Exception as e:
-        return jsonify({'error': str(e)})
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/restart', methods=['POST'])
 def restart_xray():
     try:
         subprocess.run(['pkill', '-x', 'xray'], capture_output=True)
+        subprocess.Popen(['/usr/local/xray/xray', '-config', '/usr/local/etc/xray/config.json'])
         return jsonify({'message': 'Xray ریستارت شد'})
     except Exception as e:
-        return jsonify({'error': str(e)})
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
