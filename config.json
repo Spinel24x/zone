@@ -4,6 +4,7 @@
   },
   "inbounds": [
     {
+      "tag": "vless-ws-in",
       "port": 8081,
       "listen": "127.0.0.1",
       "protocol": "vless",
@@ -13,12 +14,8 @@
       },
       "streamSettings": {
         "network": "ws",
-        "security": "none",
         "wsSettings": {
-          "path": "/ws",
-          "headers": {
-            "Host": ""
-          }
+          "path": "/ws"
         }
       }
     }
