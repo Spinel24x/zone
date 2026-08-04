@@ -11,34 +11,29 @@ import base64
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', str(uuid.uuid4()))
 
-# Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Paths
 CONFIG_PATH = '/usr/local/etc/xray/config.json'
 CSS_PATH = '/app/static/style.css'
 JS_PATH = '/app/static/zone.js'
 
-# Load CSS
 CSS = ''
 if os.path.exists(CSS_PATH):
     with open(CSS_PATH, 'r', encoding='utf-8') as f:
         CSS = f.read()
 
-# Load JS
 ZONE_JS = ''
 if os.path.exists(JS_PATH):
     with open(JS_PATH, 'r', encoding='utf-8') as f:
         ZONE_JS = f.read()
 
-# Admin credentials
 ADMIN_USER = os.environ.get('ADMIN_USER', 'admin')
 ADMIN_PASS = os.environ.get('ADMIN_PASS', 'zone2024')
-
-# Domain
 DOMAIN = os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'localhost')
+
+WS_PATH = '/ws'  # مسیر ثابت WebSocket
 
 class User(UserMixin):
     def __init__(self, id, username):
@@ -51,12 +46,13 @@ def load_user(user_id):
         return User('1', ADMIN_USER)
     return None
 
-# ==================== XRAY CONFIG MANAGEMENT ====================
-
 def load_config():
     try:
         with open(CONFIG_PATH, 'r') as f:
-            return json.load(f)
+            config = json.load(f)
+            # اطمینان از path صحیح
+            config['inbounds'][0]['streamSettings']['wsSettings']['path'] = WS_PATH
+            return config
     except:
         return create_default_config()
 
@@ -74,7 +70,7 @@ def create_default_config():
             "streamSettings": {
                 "network": "ws",
                 "wsSettings": {
-                    "path": "/"
+                    "path": WS_PATH
                 }
             }
         }],
@@ -82,6 +78,7 @@ def create_default_config():
     }
 
 def save_config(config):
+    config['inbounds'][0]['streamSettings']['wsSettings']['path'] = WS_PATH
     with open(CONFIG_PATH, 'w') as f:
         json.dump(config, f, indent=2)
     restart_xray()
@@ -96,9 +93,11 @@ def generate_vless_link(client_id, email, cleanip=None):
     
     if cleanip and cleanip.strip():
         host = cleanip.strip()
-        link = f"vless://{client_id}@{host}:443?encryption=none&security=tls&type=ws&path=%2F{client_id}&host={DOMAIN}&sni={DOMAIN}#{name}-ZONE"
     else:
-        link = f"vless://{client_id}@{DOMAIN}:443?encryption=none&security=tls&type=ws&path=%2F{client_id}&host={DOMAIN}&sni={DOMAIN}#{name}-ZONE"
+        host = DOMAIN
+    
+    # path=%2Fws یعنی /ws
+    link = f"vless://{client_id}@{host}:443?encryption=none&security=tls&type=ws&path=%2Fws&host={DOMAIN}&sni={DOMAIN}#{name}-ZONE"
     return link
 
 def generate_qr_base64(data):
@@ -137,7 +136,6 @@ def dashboard():
     config = load_config()
     clients = config['inbounds'][0]['settings']['clients']
     
-    # Ensure fields exist
     for c in clients:
         c.setdefault('email', 'Unknown')
         c.setdefault('cleanip', '')
@@ -192,11 +190,9 @@ def api_add_client():
     config = load_config()
     clients = config['inbounds'][0]['settings']['clients']
     
-    # Check max clients
     if len(clients) >= 100:
         return jsonify({'error': 'Max 100 clients reached'}), 400
     
-    # Bulk mode
     if bulk_emails:
         email_list = [e.strip() for e in bulk_emails.split('\n') if e.strip()]
         ip_list = [i.strip() for i in bulk_ips.split('\n') if i.strip()]
@@ -207,11 +203,8 @@ def api_add_client():
             cid = str(uuid.uuid4())
             cip = ip_list[idx] if idx < len(ip_list) else ''
             clients.append({
-                'id': cid,
-                'email': em,
-                'level': 0,
-                'cleanip': cip,
-                'enabled': True
+                'id': cid, 'email': em, 'level': 0,
+                'cleanip': cip, 'enabled': True
             })
             link = generate_vless_link(cid, em, cip)
             added.append({
@@ -220,22 +213,15 @@ def api_add_client():
                 'sub': f"https://{DOMAIN}/sub/{cid}"
             })
         config['inbounds'][0]['settings']['clients'] = clients
-        # Update WS paths
-        config = update_ws_paths(config)
         save_config(config)
         return jsonify({'success': True, 'clients': added})
     
-    # Single mode
     cid = str(uuid.uuid4())
     clients.append({
-        'id': cid,
-        'email': email,
-        'level': 0,
-        'cleanip': cleanip,
-        'enabled': True
+        'id': cid, 'email': email, 'level': 0,
+        'cleanip': cleanip, 'enabled': True
     })
     config['inbounds'][0]['settings']['clients'] = clients
-    config = update_ws_paths(config)
     save_config(config)
     
     link = generate_vless_link(cid, email, cleanip)
@@ -255,7 +241,6 @@ def api_delete_client(cid):
     config['inbounds'][0]['settings']['clients'] = [
         c for c in config['inbounds'][0]['settings']['clients'] if c['id'] != cid
     ]
-    config = update_ws_paths(config)
     save_config(config)
     return jsonify({'success': True})
 
@@ -298,34 +283,27 @@ def api_export(cid):
     config = load_config()
     for c in config['inbounds'][0]['settings']['clients']:
         if c['id'] == cid:
+            address = c.get('cleanip') or DOMAIN
             exp = {
                 "dns": {"servers": ["1.1.1.1", "8.8.8.8"]},
                 "inbounds": [{"port": 10808, "listen": "127.0.0.1", "protocol": "socks"}],
                 "outbounds": [{
                     "protocol": "vless",
                     "settings": {"vnext": [{
-                        "address": c.get('cleanip') or DOMAIN,
+                        "address": address,
                         "port": 443,
                         "users": [{"id": cid, "encryption": "none", "level": 0}]
                     }]},
                     "streamSettings": {
                         "network": "ws",
                         "security": "tls",
-                        "wsSettings": {"path": f"/{cid}"},
+                        "wsSettings": {"path": WS_PATH},
                         "tlsSettings": {"serverName": DOMAIN}
                     }
                 }]
             }
             return jsonify(exp)
     return jsonify({'error': 'Not found'}), 404
-
-def update_ws_paths(config):
-    """Set WS path to /UUID for each client (Xray doesn't need per-client path, so use '/' for all)"""
-    # We keep single path '/' for all, since VLESS+WS uses UUID for auth anyway
-    config['inbounds'][0]['streamSettings']['wsSettings']['path'] = '/'
-    return config
-
-# ==================== MAIN ====================
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
