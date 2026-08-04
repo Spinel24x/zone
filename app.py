@@ -18,17 +18,19 @@ login_manager.login_view = 'login'
 
 # Load CSS
 CSS = ''
-for css_path in ['style.css', '/app/style.css']:
-    if os.path.exists(css_path):
-        with open(css_path, 'r', encoding='utf-8') as f:
+css_paths = ['/app/static/style.css', 'static/style.css', 'style.css']
+for path in css_paths:
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
             CSS = f.read()
         break
 
 # Load Zone JS
 ZONE_JS = ''
-for js_path in ['zone.js', '/app/zone.js']:
-    if os.path.exists(js_path):
-        with open(js_path, 'r', encoding='utf-8') as f:
+js_paths = ['/app/static/zone.js', 'static/zone.js', 'zone.js']
+for path in js_paths:
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
             ZONE_JS = f.read()
         break
 
